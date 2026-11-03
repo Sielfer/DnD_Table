@@ -6,12 +6,32 @@ Tavolo virtuale per la rete di casa: schede dei personaggi, tracker di iniziativ
 
 Doppio clic su **`TavoloDnD.exe`**: si apre una finestra con gli indirizzi e il browser va sul tavolo. Lascia la finestra aperta durante la partita; chiudendola il tavolo si spegne. L'exe contiene già Node, quindi puoi copiarlo su qualsiasi PC Windows; i dati vengono salvati in `data.json` **nella stessa cartella dell'exe**.
 
-Se modifichi `server.js` o `index.html`, ricrea l'exe con `npm run build` (serve Node e una connessione per scaricare `postject` la prima volta). In alternativa, durante lo sviluppo: `npm start`.
+L'exe non è nel repository: va creato (vedi sotto) la prima volta su ogni computer e dopo ogni modifica a `server.js` o `index.html`.
 
 Alla prima partenza la console stampa il **PIN del master** e gli indirizzi da dare ai giocatori (es. `http://192.168.1.20:3000`).
 Per scegliere tu il PIN (o reimpostarlo): `$env:MASTER_PIN="1234"; .\TavoloDnD.exe` in PowerShell.
 
 La prima volta Windows chiede di consentire TavoloDnD nel firewall: accetta per le **reti private**, altrimenti i giocatori non si collegano.
+
+## Creare l'exe
+
+Serve [Node.js](https://nodejs.org) (versione 22 o successiva) installato sul PC dove crei l'exe; chi poi usa l'exe non ne ha bisogno.
+
+1. **Chiudi il tavolo** se è acceso (la finestra di TavoloDnD), altrimenti l'exe non si può sovrascrivere.
+2. Apri PowerShell nella cartella del progetto (in Esplora file: clic destro sulla cartella → *Apri nel terminale*).
+3. Lancia:
+   ```
+   npm run build
+   ```
+4. Alla fine compare `Creato TavoloDnD.exe`: il file è nella cartella del progetto, accanto a `data.json`.
+
+La prima volta serve internet: il comando scarica da npm `postject`, lo strumento ufficiale di Node che inserisce il programma nell'exe. Durante la creazione compare l'avviso `warning: The signature seems corrupted!`: è normale (l'exe non è firmato) e si può ignorare.
+
+Scorciatoia: `aggiorna.cmd` fa tutto da solo (scarica l'ultima versione da GitHub e crea l'exe).
+
+Cosa succede dietro (`build.js`): Node impacchetta `server.js` e `index.html` in un blob, copia `node.exe` come `TavoloDnD.exe` e ci inserisce il blob. Per questo l'exe pesa circa 90 MB: contiene Node intero.
+
+Per provare le modifiche senza ricreare l'exe: `npm start` (poi apri http://localhost:3000), e `npm test` per i controlli automatici.
 
 ## Lavorare su più computer
 
