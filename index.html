@@ -592,7 +592,8 @@ const MARGIN = { s: 2, m: 1, l: 0 };
 const E = { muro: 0, passaggio: 1, porta: 2, aperto: 3, portaAperta: 4, finestra: 5, finestraAperta: 6 };
 const GLYPH = new Set([E.porta, E.portaAperta, E.finestra, E.finestraAperta]);
 const TOGGLE = { [E.porta]: E.portaAperta, [E.portaAperta]: E.porta, [E.finestra]: E.finestraAperta, [E.finestraAperta]: E.finestra };
-const EDGE_TOOLS = [[E.muro, 'Muro'], [E.passaggio, 'Passaggio'], [E.porta, 'Porta'], [E.finestra, 'Finestra'], [E.aperto, 'Aperto'], ['toggle', 'Apri / chiudi']];
+const EDGE_TOOLS = [[E.muro, 'Muro'], [E.passaggio, 'Passaggio'], [E.porta, 'Porta'], [E.finestra, 'Finestra'], [E.aperto, 'Aperto'], ['toggle', 'Apri / chiudi'], ['flip', 'Senso di apertura']];
+const DOOR_LENS = [[0, 'Tutto il varco'], [1, '1,5 m'], [2, '3 m'], [3, '4,5 m']]; // larghezza di porte e finestre, in quadretti
 const MODES = [['brush', 'Dipingi tasselli'], ['edge', 'Porte, finestre e passaggi'], ['obj', 'Oggetti, arredo e natura'], ['tok', 'Personaggi']];
 const DOT = ['#ffffff55', '#5fd38a', '#e3a85c', '#6fc3ff', '#e3a85c', '#9fd8ff', '#9fd8ff'];
 // Ogni lato è salvato una volta sola, sul tassello a ovest ("e") o a nord ("s"): i due vicini lo condividono.
@@ -676,9 +677,10 @@ function wallAt(m, F, x, y, right) {
 
 // Porte e finestre spostate a mano: { v: verticale, x, y, n: lunghezza, s: stato }, sulla linea x (v) o y.
 const doorFits = (m, F, { v, x, y, n }) => Array.from({ length: n }, (_, i) => (v ? wallAt(m, F, x - 1, y + i, true) : wallAt(m, F, x + i, y - 1, false))).every(Boolean);
-const glyphG = (s, right, line, t0, L, floorA) =>
-  `<g transform="${right ? `translate(${line} ${t0})` : `translate(${t0} ${line}) rotate(-90)`}${(right ? !floorA : floorA) ? ' scale(-1 1)' : ''}">${glyph(s, L)}</g>`;
-const doorGlyph = (F, { v, x, y, n }, s) => glyphG(s, v, v ? x : y, v ? y : x, n, Array.from({ length: n }, (_, i) => (v ? F(x - 1, y + i) : F(x + i, y - 1))).some(Boolean));
+// f: senso di apertura scelto dal master. bit 1: si apre verso l'altro lato; bit 2: cardini all'altra estremità.
+const glyphG = (s, right, line, t0, L, floorA, f = 0) =>
+  `<g transform="${right ? `translate(${line} ${t0})` : `translate(${t0} ${line}) rotate(-90)`}${(right ? !floorA : floorA) !== !!(f & 1) ? ' scale(-1 1)' : ''}${f & 2 ? ` translate(0 ${L}) scale(1 -1)` : ''}">${glyph(s, L)}</g>`;
+const doorGlyph = (F, { v, x, y, n, f }, s) => glyphG(s, v, v ? x : y, v ? y : x, n, Array.from({ length: n }, (_, i) => (v ? F(x - 1, y + i) : F(x + i, y - 1))).some(Boolean), f);
 // La posizione lungo un muro più vicina al puntatore (entro 2 quadretti), o null.
 function doorSnap({ view, F, n }, sx, sy) {
   let best = null, bd = Infinity;
@@ -713,7 +715,7 @@ function layerSvg(m, mode, grid) {
   for (let y = -1; y < H; y++) for (let x = -1; x < W; x++) { if (y >= 0) side(x, y, true); if (x >= 0) side(x, y, false); }
   // in modalità "porte" ogni disegno si può trascinare
   const grab = (attrs, g) => (mode === 'edge' ? `<g data-door="1" ${attrs}>${g}</g>` : g);
-  for (const dr of doors) glyphs += grab(`data-did="${dr.id}" data-n="${dr.n}" data-s="${dr.s}"`, doorGlyph(F, dr, dr.s));
+  for (const dr of doors) glyphs += grab(`data-did="${dr.id}" data-n="${dr.n}" data-s="${dr.s}" data-f="${dr.f || 0}"`, doorGlyph(F, dr, dr.s));
 
   // porte e finestre: un disegno per lato, lungo quanto il pavimento nel varco
   for (const [k, s] of Object.entries(m.edges || {})) {
@@ -724,10 +726,15 @@ function layerSvg(m, mode, grid) {
     const on = [];
     for (let p = GATE[0]; p < GATE[1]; p++) if (right ? F(line - 1, base + p) || F(line, base + p) : F(base + p, line - 1) || F(base + p, line)) on.push(p);
     if (!on.length) continue;
-    const t0 = base + on[0], L = on.at(-1) - on[0] + 1;
+    let t0 = base + on[0], L = on.at(-1) - on[0] + 1;
     // il battente e le ante si aprono verso il pavimento (il lato A è a sinistra o sopra)
     const floorA = on.some(p => (right ? F(line - 1, base + p) : F(base + p, line - 1)));
-    glyphs += grab(`data-ek="${k}" data-n="${L}" data-s="${s}"`, glyphG(s, right, line, t0, L, floorA));
+    // porta più stretta del varco: al centro, e muro ai due lati
+    const o = m.edoor?.[k], n = Math.min(L, o?.n || L), off = Math.floor((L - n) / 2);
+    for (let p = t0; p < t0 + L; p++) if (p < t0 + off || p >= t0 + off + n) walls += right ? `M${line} ${p}V${p + 1}` : `M${p} ${line}H${p + 1}`;
+    t0 += off;
+    L = n;
+    glyphs += grab(`data-ek="${k}" data-n="${L}" data-s="${s}" data-f="${o?.f || 0}"`, glyphG(s, right, line, t0, L, floorA, o?.f));
   }
   return `${rects}${grid ? `<rect width="${W}" height="${H}" fill="url(#mapgrid)"/>` : ''}
     <path d="${walls}" stroke="#000" stroke-opacity=".35" stroke-width=".7" stroke-linecap="round" fill="none"/>
@@ -780,7 +787,18 @@ const FLAT = new Set(['rug', 'carpet']); // stanno sotto a tutto il resto
 const VEG = new Set(['bush', 'tree']);
 const VEG_STATES = [['lush', 'Rigogliosa'], ['dry', 'Secca'], ['inf', 'Infestata']];
 const ruinLabel = t => (OBJ[t]?.[3] === 'pass' ? 'Rovinata (inagibile)' : t === 'boulder' ? 'Spaccato' : t === 'candelabra' ? 'Spento' : t === 'fountain' ? 'Secca e rotta' : 'Rotto');
-const footprint = o => { const k = o.n || 1, [w, h] = OBJ[o.type]; return o.rot % 2 ? [h * k, w * k] : [w * k, h * k]; }; // n: statue più grandi
+// Misure a scelta [larghezza, lunghezza, nome] in quadretti; l'oggetto le salva in w e h.
+const SIZE_OPTS = {
+  table: [[2, 1, 'Piccolo'], [3, 2, 'Medio'], [4, 2, 'Grande'], [6, 2, 'Lungo']],
+  shelf: [[2, 1, 'Corta'], [3, 1, 'Media'], [4, 1, 'Lunga'], [6, 1, 'Lunghissima']],
+  stairs: [[1, 3, 'Stretta'], [2, 3, 'Normale'], [3, 4, 'Larga'], [4, 6, 'Monumentale']],
+  spiral: [[2, 2, 'Piccola'], [3, 3, 'Grande'], [4, 4, 'Enorme']],
+};
+const baseDims = o => (o.w ? [o.w, o.h] : OBJ[o.type].slice(0, 2));
+const footprint = o => { const k = o.n || 1, [w, h] = baseDims(o); return o.rot % 2 ? [h * k, w * k] : [w * k, h * k]; }; // n: statue più grandi
+// misura scelta per un tipo (indice in SIZE_OPTS), di base quella del disegno originale
+const sizeIdx = t => ui.obj.sz?.[t] ?? SIZE_OPTS[t].findIndex(([w, h]) => w === OBJ[t][0] && h === OBJ[t][1]);
+const meters = n => String(n * 1.5).replace('.', ',');
 
 function ladderShape(L, ruined, scale = 1) {
   const r = .3 * scale, frame = '#141210', wood = '#c9873f';
@@ -822,7 +840,8 @@ function decorShape(t, ruined, w, h, inf, n = 1) {
     bed: `<rect x="-.45" y="-.95" width=".9" height="1.9" rx=".08" fill="${WOOD_D}" ${k}/><rect x="-.37" y="-.5" width=".74" height="1.37" rx=".06" fill="#a8453c" stroke="#5e221d" stroke-width=".05"/>
       <path d="M-.37 -.3H.37" stroke="#d98a7a" stroke-width=".06"/><rect x="-.32" y="-.86" width=".64" height=".28" rx=".1" fill="#efe6d2" stroke="#8d8270" stroke-width=".04"/>`,
     chair: `<rect x="-.3" y="-.2" width=".6" height=".54" rx=".06" fill="${WOOD}" ${k}/><rect x="-.34" y="-.4" width=".68" height=".18" rx=".05" fill="${WOOD_D}" ${k}/>`,
-    table: `<rect x="-.92" y="-.42" width="1.84" height=".84" rx=".08" fill="#9c6a35" ${k}/><path d="M-.88 -.14H.88M-.88 .14H.88" stroke="${WOOD_D}" stroke-width=".04"/>`,
+    table: `<rect x="${-w / 2 + .08}" y="${-h / 2 + .08}" width="${w - .16}" height="${h - .16}" rx=".08" fill="#9c6a35" ${k}/>
+      <path d="${Array.from({ length: Math.max(0, Math.floor((h - .56) / .28) + 1) }, (_, i) => `M${-w / 2 + .12} ${(-h / 2 + .36 + i * .28).toFixed(2)}H${w / 2 - .12}`).join('')}" stroke="${WOOD_D}" stroke-width=".04"/>`,
     barrel: `<circle r=".42" fill="${WOOD_D}" ${k}/><circle r=".33" fill="${WOOD}" stroke="#4a4a4a" stroke-width=".06"/><path d="M-.33 -.1H.33M-.33 .1H.33" stroke="${WOOD_D}" stroke-width=".03"/>`,
     crate: `<rect x="-.4" y="-.4" width=".8" height=".8" fill="#b98b4e" ${k}/><rect x="-.32" y="-.32" width=".64" height=".64" fill="none" stroke="#7a5a2c" stroke-width=".05"/>
       <path d="M-.32 -.32L.32 .32M.32 -.32L-.32 .32" stroke="#7a5a2c" stroke-width=".07"/>`,
@@ -833,8 +852,8 @@ function decorShape(t, ruined, w, h, inf, n = 1) {
       : '<path d="M-.1 -.18q.06-.1.15-.12" stroke="#fff" stroke-width=".05" fill="none"/>'}`,
     rug: `<rect x="-.95" y="-1.42" width="1.9" height="2.84" rx=".05" fill="#8e2f3a" stroke="#5a1a22" stroke-width=".05"/><rect x="-.75" y="-1.22" width="1.5" height="2.44" fill="none" stroke="#d8a54a" stroke-width=".08"/>
       <path d="M0 -.85L.5 0L0 .85L-.5 0z" fill="#c4693a" stroke="#d8a54a" stroke-width=".05"/><path d="${[-.9, -.6, -.3, 0, .3, .6, .9].map(x => `M${x} -1.42V-1.52M${x} 1.42V1.52`).join('')}" stroke="#d8a54a" stroke-width=".04"/>`,
-    shelf: `<rect x="-.95" y="-.35" width="1.9" height=".7" fill="#6e4726" ${k}/>${['#8e2f3a', '#2f5a8e', '#3f7a32', '#c9a24a', '#5a3a7a', '#8e2f3a', '#2f5a8e', '#c4693a']
-      .map((c, i) => `<rect x="${(-.85 + i * .215).toFixed(3)}" y="-.25" width=".17" height=".42" fill="${c}"/>`).join('')}`,
+    shelf: `<rect x="${-w / 2 + .05}" y="-.35" width="${w - .1}" height=".7" fill="#6e4726" ${k}/>${Array.from({ length: Math.floor((w - .2) / .215) }, (_, i) =>
+      `<rect x="${(-w / 2 + .15 + i * .215).toFixed(3)}" y="-.25" width=".17" height=".42" fill="${['#8e2f3a', '#2f5a8e', '#3f7a32', '#c9a24a', '#5a3a7a', '#c4693a'][i % 6]}"/>`).join('')}`,
     wardrobe: `<rect x="-.95" y="-.4" width="1.9" height=".8" rx=".05" fill="${WOOD_D}" ${k}/><path d="M0 -.4V.4" stroke="${INK}" stroke-width=".06"/><circle cx="-.12" r=".05" fill="#e3c86a"/><circle cx=".12" r=".05" fill="#e3c86a"/>`,
     brazier: `<circle r=".38" fill="#3a3a3a" ${k}/><circle r=".27" fill="${ruined ? '#2a2522' : '#e8662a'}"/>${ruined
       ? '<g fill="#555"><circle cx="-.08" cy=".05" r=".06"/><circle cx=".1" cy="-.06" r=".05"/></g>'
@@ -873,37 +892,39 @@ function decorShape(t, ruined, w, h, inf, n = 1) {
 
 // Disegno centrato in 0,0 a rotazione 0.
 function objShape(o, arrival) {
-  const [w, h] = OBJ[o.type], frame = '#141210';
+  const [w, h] = baseDims(o), frame = '#141210';
   if (OBJ[o.type][3] !== 'pass') return decorShape(o.type, o.ruined, w, h, o.inf, o.n);
   const dash = arrival ? 'stroke="#ffe2a6" stroke-width=".12" stroke-dasharray=".35 .25"' : `stroke="${frame}" stroke-width=".12"`;
   if (o.type === 'stairs') {
-    const n = 6;
+    const n = Math.max(4, Math.round(h * 2)); // un gradino ogni 75 cm
     let steps = '';
     for (let i = 0; i < n; i++) {
       if (o.ruined && (i === 2 || i === 3)) continue;
       const c = 205 - (o.dir === 'down' ? n - 1 - i : i) * 16; // gradini più chiari = più in alto; la freccia indica dove si cammina
       steps += `<rect x="${-w / 2 + .1}" y="${-h / 2 + i * h / n + .05}" width="${w - .2}" height="${h / n - .08}" fill="rgb(${c} ${c - 10} ${c - 24})"/>`;
     }
-    const ruin = o.ruined ? `<rect x="${-w / 2 + .1}" y="${-h / 2 + 2 * h / n}" width="${w - .2}" height="${2 * h / n}" fill="#1a1714"/>
+    // macerie disegnate per la scala 2×3, adattate alla misura
+    const ruin = o.ruined ? `<rect x="${-w / 2 + .1}" y="${-h / 2 + 2 * h / n}" width="${w - .2}" height="${2 * h / n}" fill="#1a1714"/><g transform="scale(${w / 2} ${h / 3})">
       <g fill="#7d746a"><circle cx="-.5" cy="-.3" r=".16"/><circle cx=".1" cy=".1" r=".12"/><circle cx=".55" cy="-.15" r=".18"/><circle cx="-.15" cy="-.05" r=".09"/></g>
-      <path d="M-.9 -1.1l.4.3-.2.3.5.2M.4 .9l.3-.3.3.15" stroke="#1a1714" stroke-width=".07" fill="none"/>` : '';
+      <path d="M-.9 -1.1l.4.3-.2.3.5.2M.4 .9l.3-.3.3.15" stroke="#1a1714" stroke-width=".07" fill="none"/></g>` : '';
     const arrow = `<path d="M0 ${h / 2 - .35}V${-h / 2 + .55}" stroke="${frame}" stroke-width=".14"/><path d="M-.3 ${-h / 2 + .7}L0 ${-h / 2 + .3}L.3 ${-h / 2 + .7}z" fill="${frame}"/>`;
     return `<rect x="${-w / 2}" y="${-h / 2}" width="${w}" height="${h}" rx=".08" fill="#4b443c" ${dash}/>${steps}${ruin}${o.ruined ? '' : arrow}`;
   }
   if (o.type === 'spiral') {
     // gradini a spicchio attorno al palo, più chiari = più in alto; si sale girando in senso orario
     const n = 9, R = .9, r = .22, p = (rad, a) => `${(rad * Math.cos(a)).toFixed(3)} ${(rad * Math.sin(a)).toFixed(3)}`;
+    const k = w / 2, dash = arrival ? `stroke="#ffe2a6" stroke-width="${.12 / k}" stroke-dasharray="${.35 / k} ${.25 / k}"` : `stroke="${frame}" stroke-width="${.12 / k}"`; // disegnata per 2×2 e ingrandita: bordi sottili
     let steps = '';
     for (let i = 0; i < n; i++) {
       if (o.ruined && (i === 3 || i === 4)) continue;
       const a0 = -Math.PI / 2 + i / n * 2 * Math.PI, a1 = a0 + 2 * Math.PI / n, c = 110 + (o.dir === 'down' ? n - 1 - i : i) * 12;
-      steps += `<path d="M${p(r, a0)}L${p(R, a0)}A${R} ${R} 0 0 1 ${p(R, a1)}L${p(r, a1)}z" fill="rgb(${c} ${c - 10} ${c - 24})" stroke="${frame}" stroke-width=".04"/>`;
+      steps += `<path d="M${p(r, a0)}L${p(R, a0)}A${R} ${R} 0 0 1 ${p(R, a1)}L${p(r, a1)}z" fill="rgb(${c} ${c - 10} ${c - 24})" stroke="${frame}" stroke-width="${.04 / k}"/>`;
     }
-    const e = -Math.PI / 2 - .5, tip = [.58 * Math.cos(e), .58 * Math.sin(e)], t = [-Math.sin(e), Math.cos(e)], nrm = [Math.cos(e), Math.sin(e)];
+    const e =-Math.PI / 2 - .5, tip = [.58 * Math.cos(e), .58 * Math.sin(e)], t = [-Math.sin(e), Math.cos(e)], nrm = [Math.cos(e), Math.sin(e)];
     const head = [[tip[0] + t[0] * .22, tip[1] + t[1] * .22], [tip[0] + nrm[0] * .13, tip[1] + nrm[1] * .13], [tip[0] - nrm[0] * .13, tip[1] - nrm[1] * .13]].map(q => q.map(v => v.toFixed(3)).join(' '));
-    const arrow = `<path d="M${p(.58, -Math.PI / 2 + .35)}A.58 .58 0 1 1 ${p(.58, e)}" stroke="${frame}" stroke-width=".1" fill="none"/><path d="M${head[0]}L${head[1]}L${head[2]}z" fill="${frame}"/>`;
+    const arrow = `<path d="M${p(.58, -Math.PI / 2 + .35)}A.58 .58 0 1 1 ${p(.58, e)}" stroke="${frame}" stroke-width="${.1 / k}" fill="none"/><path d="M${head[0]}L${head[1]}L${head[2]}z" fill="${frame}"/>`;
     const ruin = o.ruined ? `<g fill="#7d746a"><circle cx=".55" cy=".35" r=".12"/><circle cx=".3" cy=".6" r=".09"/><circle cx=".62" cy=".05" r=".08"/></g>` : '';
-    return `<circle r=".97" fill="#1a1714" ${dash}/>${steps}${ruin}<circle r="${r}" fill="#3a332c" stroke="${frame}" stroke-width=".06"/>${o.ruined ? '' : arrow}`;
+    return `<g transform="scale(${k})"><circle r=".97" fill="#1a1714" ${dash}/>${steps}${ruin}<circle r="${r}" fill="#3a332c" stroke="${frame}" stroke-width="${.06 / k}"/>${o.ruined ? '' : arrow}</g>`;
   }
   if (o.type === 'ladder') return `${arrival ? `<rect x="-.5" y="-1" width="1" height="2" fill="none" ${dash}/>` : ''}${ladderShape(h - .1, o.ruined)}`;
   if (o.type === 'well') {
@@ -960,7 +981,8 @@ function kindIcon(kind) {
 }
 const edgeIcon = s => icon(`<rect x="-2.5" y="-.5" width="5" height="5" fill="url(#tex-pietra)"/>
   ${s === E.muro ? '<path d="M0 -.5V4.5" stroke="#2b2724" stroke-width=".4"/>' : s === E.aperto ? '' : '<path d="M0 -.5V0M0 4V4.5" stroke="#2b2724" stroke-width=".4"/>'}
-  ${s === 'toggle' ? glyph(E.portaAperta, 4) : GLYPH.has(s) ? glyph(s, 4) : ''}`, '-2.5 -.5 5 5');
+  ${s === 'toggle' ? glyph(E.portaAperta, 4) : s === 'flip' // porta aperta dall'altra parte, con una freccia che gira
+    ? `<g transform="scale(-1 1)">${glyph(E.portaAperta, 4)}</g><path d="M-1.6 3.6a1.4 1.4 0 0 1 -.2-2" stroke="#9b85ff" stroke-width=".25" fill="none"/><path d="M-2.2 1.9l.5-.6.4.7z" fill="#9b85ff"/>` : GLYPH.has(s) ? glyph(s, 4) : ''}`, '-2.5 -.5 5 5');
 const TOK_COLORS = ['#e5484d', '#3e8ef7', '#30a46c', '#f5a524', '#8e4ec6', '#12a594', '#e93d82', '#ad7f58'];
 const tokColor = cid => TOK_COLORS[Math.abs([...String(cid)].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) | 0, 0)) % TOK_COLORS.length];
 const initials = c => esc((c.name || '?').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase());
@@ -981,7 +1003,7 @@ function tokensSvg(m, mode) {
   }).join('');
 }
 const objIcon = o => {
-  const s = Math.max(3.4, ...OBJ[o.type].slice(0, 2).map(n => n + .4)); // gli oggetti lunghi entrano interi
+  const s = Math.max(3.4, ...baseDims(o).map(n => n + .4)); // gli oggetti lunghi entrano interi
   return icon(`<rect x="${-s / 2}" y="${-s / 2}" width="${s}" height="${s}" fill="url(#tex-pietra)"/>${objShape({ dir: 'up', rot: 0, ...o })}`, `${-s / 2} ${-s / 2} ${s} ${s}`);
 };
 
@@ -1051,13 +1073,17 @@ function maps() {
       })() : '');
     hint = 'Clic o trascina per dipingere i tasselli; <b>tasto destro</b> per tornare roccia. I corridoi si collegano da soli ai tasselli vicini; tra due stanze apri tu il passaggio.';
   } else if (mode === 'edge') {
-    tools = group('Strumento per i lati', EDGE_TOOLS.map(([v, l]) => tool(String(ui.edgeTool) === String(v), 'edgeTool', `data-arg="${v}"`, edgeIcon(v), l)).join(''));
-    hint = 'Clic su un pallino per mettere lo strumento scelto su quel lato, anche sul bordo esterno. Con <b>Apri / chiudi</b> apri e chiudi porte e finestre durante la partita: i giocatori lo vedono subito. <b>Aperto</b> toglie il muro e unisce due stanze grandi in una sala. Trascina una porta o una finestra per spostarla lungo il muro: si aggancia da sola ai muri vicini. Il <b>tasto destro</b> rimette il muro.';
+    const et = ui.edgeTool, dl = ui.doorLen || 0;
+    tools = group('Strumento per i lati', EDGE_TOOLS.map(([v, l]) => tool(String(et) === String(v), 'edgeTool', `data-arg="${v}"`, edgeIcon(v), l)).join(''))
+      + (GLYPH.has(et) ? group('Larghezza', DOOR_LENS.map(([v, l]) => tool(dl === v, 'doorLen', `data-arg="${v}"`,
+        icon(`<rect x="-2.5" y="-.5" width="5" height="5" fill="url(#tex-pietra)"/><path d="M0 -.5V4.5" stroke="#2b2724" stroke-width=".4"/><g transform="translate(0 ${(4 - (v || 4)) / 2})">${glyph(et, v || 4)}</g>`, '-2.5 -.5 5 5'), l)).join('')) : '');
+    hint = 'Clic su un pallino per mettere lo strumento scelto su quel lato, anche sul bordo esterno. Porte e finestre più strette del varco stanno al centro, con il muro ai lati. Con <b>Apri / chiudi</b> apri e chiudi porte e finestre durante la partita: i giocatori lo vedono subito. Con <b>Senso di apertura</b> ogni clic su una porta cambia verso dove si apre e da che parte ha i cardini. <b>Aperto</b> toglie il muro e unisce due stanze grandi in una sala. Trascina una porta o una finestra per spostarla lungo il muro: si aggancia da sola ai muri vicini. Il <b>tasto destro</b> rimette il muro.';
   } else if (mode === 'tok') {
     tools = tokBar;
     hint = tokHint;
   } else {
-    const sample = { ...ob, type: OBJ[ob.type] ? ob.type : 'stairs' };
+    const st = OBJ[ob.type] ? ob.type : 'stairs', so = SIZE_OPTS[st]?.[sizeIdx(st)];
+    const sample = { ...ob, type: st, ...(so && { w: so[0], h: so[1] }) };
     // una categoria alla volta, come schede: meno da scorrere
     const og = OBJ_GROUPS.some(([g]) => g === ui.objGroup) ? ui.objGroup : OBJ[ob.type]?.[3] || 'pass';
     tools = `<nav class="maptabs sub">${OBJ_GROUPS.map(([g, gl]) => `<button data-do="objGroup" data-arg="${g}" class="${g === og ? 'on' : ''}">${gl}</button>`).join('')}</nav>`
@@ -1070,7 +1096,9 @@ function maps() {
         ob.type === 'statue' ? STATUE_SIZES.map(([v, l]) => tool((+ob.n || 1) === v, 'objSet', `data-f="n" data-v="${v}"`,
           // l'anteprima mostra la statua in proporzione: la colossale riempie il riquadro
           icon(`<rect width="5" height="5" fill="url(#tex-pietra)"/><g transform="translate(2.5 2.5) scale(${v * 1.15})">${objShape({ type: 'statue' })}</g>`, '0 0 5 5'),
-          `${l} (${String(v * 1.5).replace('.', ',')} m)`)).join('') : '',
+          `${l} (${meters(v)} m)`)).join('') : '',
+        SIZE_OPTS[ob.type] ? SIZE_OPTS[ob.type].map(([w, h, l], i) => tool(sizeIdx(ob.type) === i, 'objSize', `data-arg="${i}"`,
+          objIcon({ ...sample, w, h, ruined: false }), `${l} (${meters(w)}×${meters(h)} m)`)).join('') : '',
         ROUND.has(ob.type) ? '' : tool(false, 'objRotate', '', objIcon({ ...sample, rot: ob.rot }), `Ruota (${ob.rot * 90}°)`),
         ob.type === 'hole' || ob.type === 'pit' ? tool(ob.ladder, 'objToggle', 'data-f="ladder"', objIcon({ ...sample, ladder: true, ruined: false }), 'Con scala a pioli') : '',
         VEG.has(ob.type) ? VEG_STATES.map(([v, l]) => tool((ob.veg || 'lush') === v, 'objSet', `data-f="veg" data-v="${v}"`, objIcon({ type: ob.type, ruined: v === 'dry', inf: v === 'inf' }), l)).join('')
@@ -1121,6 +1149,7 @@ function shiftMap(m, dx, dy) {
   for (const l of m.levels) {
     l.tiles = mv(l.tiles);
     l.edges = mv(l.edges);
+    l.edoor = mv(l.edoor);
     for (const o of [...(l.objects || []), ...(l.doors || [])]) { o.x += dx * TILE; o.y += dy * TILE; }
   }
 }
@@ -1133,6 +1162,7 @@ function clipMap(m) {
     const n = Object.keys(l.tiles || {}).length + (l.objects || []).length;
     l.tiles = keep(l.tiles, (x, y) => x >= 0 && y >= 0 && x < m.cols && y < m.rows);
     l.edges = keep(l.edges, (x, y) => x >= -1 && y >= -1 && x < m.cols && y < m.rows); // -1: i lati sul bordo ovest/nord
+    l.edoor = keep(l.edoor, (x, y) => x >= -1 && y >= -1 && x < m.cols && y < m.rows);
     l.objects = (l.objects || []).filter(o => { const [fw, fh] = footprint(o); return o.x >= 0 && o.y >= 0 && o.x + fw <= W && o.y + fh <= H; });
     l.doors = (l.doors || []).filter(d => d.x >= 0 && d.y >= 0 && d.x <= W && d.y <= H);
     lost += n - Object.keys(l.tiles).length - l.objects.length;
@@ -1240,7 +1270,9 @@ function mapClick(e, erase) {
       if (!OBJ[type]) return;
       const plant = VEG.has(type) && { ruined: veg === 'dry', inf: veg === 'inf' };
       if (plant && h?.type === type) return Object.assign(h, plant); // clic su una pianta uguale: ne cambia lo stato
-      const o = { id: rid(), type, rot: ROUND.has(type) ? 0 : rot, dir, ruined: type !== 'well' && ruined, ladder, ...plant, ...(type === 'statue' && +ui.obj.n > 1 && { n: +ui.obj.n }) };
+      const so = SIZE_OPTS[type]?.[sizeIdx(type)];
+      const o = { id: rid(), type, rot: ROUND.has(type) ? 0 : rot, dir, ruined: type !== 'well' && ruined, ladder, ...plant,
+        ...(type === 'statue' && +ui.obj.n > 1 && { n: +ui.obj.n }), ...(so && { w: so[0], h: so[1] }) };
       const [fw, fh] = footprint(o);
       // il quadretto cliccato sta al centro dell'oggetto
       o.x = Math.min(W - fw, Math.max(0, qx - Math.floor((fw - 1) / 2)));
@@ -1254,17 +1286,27 @@ function mapClick(e, erase) {
       const t = erase ? E.muro : ui.edgeTool;
       if (fd >= 0) {
         const dr = lv.doors[fd];
-        if (t === 'toggle') dr.s = TOGGLE[dr.s] ?? dr.s;
-        else if (GLYPH.has(num(t))) dr.s = num(t);
-        else lv.doors.splice(fd, 1);
+        if (t === 'flip') dr.f = ((dr.f || 0) + 1) % 4;
+        else if (t === 'toggle') dr.s = TOGGLE[dr.s] ?? dr.s;
+        else if (GLYPH.has(num(t))) {
+          dr.s = num(t);
+          // nuova larghezza solo se c'è muro sotto per tutta la sua lunghezza
+          const view = { ...lv, cols: map.cols, rows: map.rows }, cand = { ...dr, n: ui.doorLen || dr.n };
+          if (doorFits(view, floorOf(view).F, cand)) dr.n = cand.n;
+        } else lv.doors.splice(fd, 1);
         return;
       }
       // il lato più vicino al punto cliccato
       const lx = sx - tx * TILE, ly = sy - ty * TILE;
       const d = [['w', lx], ['e', TILE - lx], ['n', ly], ['s', TILE - ly]].sort((a, b) => a[1] - b[1])[0][0];
       const k = edgeKey(tx, ty, d), cur = lv.edges[k] || 0;
+      lv.edoor ??= {};
+      if (t === 'flip') { if (GLYPH.has(cur)) lv.edoor[k] = { ...lv.edoor[k], f: ((lv.edoor[k]?.f || 0) + 1) % 4 }; return; }
       const next = t === 'toggle' ? TOGGLE[cur] ?? cur : num(t);
       if (next) lv.edges[k] = next; else delete lv.edges[k];
+      // larghezza e senso di apertura restano solo su porte e finestre
+      if (!GLYPH.has(next)) delete lv.edoor[k];
+      else if (t !== 'toggle') { const { n, ...rest } = lv.edoor[k] || {}; lv.edoor[k] = { ...rest, ...(ui.doorLen && { n: ui.doorLen }) }; }
     }
   });
 }
@@ -1313,7 +1355,7 @@ addEventListener('pointerdown', e => {
   if (g.dataset.door) {
     const m = S.maps.find(x => x.id === g.ownerSVGElement.dataset.id), view = { ...structuredClone(curLevel(m)), cols: m.cols, rows: m.rows };
     if (g.dataset.ek) delete view.edges[g.dataset.ek]; // la porta lascia il suo varco: lì torna il muro
-    drag.door = { view, F: floorOf(view).F, n: +g.dataset.n, s: +g.dataset.s, at: null };
+    drag.door = { view, F: floorOf(view).F, n: +g.dataset.n, s: +g.dataset.s, f: +g.dataset.f || 0, at: null };
   }
 });
 addEventListener('pointermove', e => {
@@ -1323,7 +1365,7 @@ addEventListener('pointermove', e => {
   if (!drag.moved) return;
   if (drag.door) {
     const at = doorSnap(drag.door, ...toMap(svg, e));
-    if (at) { drag.door.at = at; drag.g.innerHTML = doorGlyph(drag.door.F, at, drag.door.s); }
+    if (at) { drag.door.at = at; drag.g.innerHTML = doorGlyph(drag.door.F, { ...at, f: drag.door.f }, drag.door.s); }
     drag.g.classList.add('dragging');
     return;
   }
@@ -1344,7 +1386,7 @@ addEventListener('pointerup', () => {
     return setMaps(ms => {
       const lv = curLevel(ms.find(x => x.id === mid)), { ek, did } = d.g.dataset;
       lv.doors ??= [];
-      if (ek) { delete lv.edges[ek]; lv.doors.push({ id: rid(), s: d.door.s, ...d.door.at }); }
+      if (ek) { delete lv.edges[ek]; lv.doors.push({ id: rid(), s: d.door.s, ...(d.door.f && { f: d.door.f }), ...d.door.at }); }
       else Object.assign(lv.doors.find(x => x.id === did) || {}, d.door.at);
     });
   }
@@ -1502,6 +1544,8 @@ const handlers = {
   },
   objGroup: a => { ui.objGroup = a; saveUi(); render(); },
   ghost: a => { ui.ghost = a || null; saveUi(); render(); },
+  objSize: a => { ui.obj = { ...ui.obj, sz: { ...ui.obj.sz, [ui.obj.type]: +a } }; saveUi(); render(); },
+  doorLen: a => { ui.doorLen = +a; saveUi(); render(); },
   mapFull: () => {
     ui.mapFull = !ui.mapFull;
     // anche il browser a tutto schermo, se lo permette; Esc esce da entrambi
@@ -1513,7 +1557,7 @@ const handlers = {
   palDock: () => { ui.palPos = null; saveUi(); render(); },
   mapMode: a => { ui.mapMode = a; saveUi(); render(); },
   brushSet: (_, d) => { ui.brush = { ...ui.brush, [d.f]: d.f === 'w' ? num(d.v) : d.v }; saveUi(); render(); },
-  edgeTool: a => { ui.edgeTool = a === 'toggle' ? a : num(a); saveUi(); render(); },
+  edgeTool: a => { ui.edgeTool = a === 'toggle' || a === 'flip' ? a : num(a); saveUi(); render(); },
   objSet: (_, d) => { ui.obj = { ...ui.obj, [d.f]: d.v }; saveUi(); render(); },
   objToggle: (_, d) => { ui.obj = { ...ui.obj, [d.f]: !ui.obj[d.f] }; saveUi(); render(); },
   objRotate: () => { ui.obj = { ...ui.obj, rot: (ui.obj.rot + 1) % 4 }; saveUi(); render(); },
