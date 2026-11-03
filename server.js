@@ -336,7 +336,7 @@ const json = (res, status, obj, headers = {}) => {
 };
 const body = req => new Promise((resolve, reject) => {
   let s = '';
-  req.on('data', d => { s += d; if (s.length > 1e6) { reject(Object.assign(new Error('Richiesta troppo grande'), { status: 413 })); req.destroy(); } });
+  req.on('data', d => { s += d; if (s.length > 8e6) { reject(Object.assign(new Error('Richiesta troppo grande'), { status: 413 })); req.destroy(); } });
   req.on('end', () => {
     try {
       const v = JSON.parse(s);

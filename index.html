@@ -169,6 +169,19 @@ body[data-tab=maps] .layout { max-width: none; }
 .palbody { overflow: auto; padding: 12px 14px; }
 .palette .maptabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
 .palette .maptabs button { padding: 6px 8px; line-height: 1.2; }
+.palette .maptabs.sub { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); margin-bottom: 12px; }
+.maptabs kbd { float: right; padding: 0 5px; border-radius: 4px; font: 600 11px system-ui, sans-serif; background: rgb(127 127 127 / .2); }
+/* + e − sui quattro lati per allargare o stringere la mappa da quella parte */
+.growwrap { display: grid; grid-template: ". n ." auto "w m e" auto ". s ." auto / auto auto auto; gap: 4px; width: max-content; }
+.growwrap.fit { width: 100%; grid-template-columns: auto minmax(0, 1fr) auto; }
+.growwrap > svg { grid-area: m; }
+.grow-n { grid-area: n; } .grow-s { grid-area: s; } .grow-w { grid-area: w; } .grow-e { grid-area: e; }
+.grow > span { position: sticky; left: 8px; top: 8px; display: flex; gap: 4px; }
+.grow-w > span, .grow-e > span { flex-direction: column; }
+.grow button { padding: 1px 9px; font-weight: 700; opacity: .75; }
+.grow button:hover { opacity: 1; }
+@keyframes ping { 50% { filter: drop-shadow(0 0 .3px #fff) drop-shadow(0 0 .9px #ffd84d); } }
+#mapsvg .ping { animation: ping .7s ease 4; }
 .mapstage.full { position: fixed; inset: 0; z-index: 40; margin: 0; border-radius: 0; display: flex; flex-direction: column; }
 .mapstage.full .mapbody { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); }
 .mapstage.full .mapscroll, .mapstage.full .palette { max-height: 100%; }
@@ -569,6 +582,7 @@ function story() {
 // Tassello = 10×10 quadretti da 1,5 m (15 m di lato). I passaggi stanno sempre al centro di ogni lato,
 // così due tasselli vicini si congiungono nello stesso punto qualunque sia il loro tipo.
 const TILE = 10, GATE = [3, 7]; // varco: quadretti 3..6 di ogni lato
+const MAX_TILES = 40; // per lato: 600 m
 const TERRAIN = { pietra: 'Pietra', legno: 'Legno', erba: 'Erba', sabbia: 'Sabbia', acqua: 'Acqua', lava: 'Lava' };
 const WATER = [['#4a82bb', 'Limpida'], ['#1f4a7a', 'Profonda'], ['#7d7a45', 'Impura'], ['#4d6b3b', 'Palude'], ['#5e4a30', 'Fogna'], ['#b8e2ef', 'Gelida'], ['#7b3fae', 'Magica']];
 const hex = c => (/^#[0-9a-f]{6}$/i.test(c) ? c : WATER[0][0]); // il colore finisce in un attributo SVG: solo #rrggbb
@@ -579,6 +593,7 @@ const E = { muro: 0, passaggio: 1, porta: 2, aperto: 3, portaAperta: 4, finestra
 const GLYPH = new Set([E.porta, E.portaAperta, E.finestra, E.finestraAperta]);
 const TOGGLE = { [E.porta]: E.portaAperta, [E.portaAperta]: E.porta, [E.finestra]: E.finestraAperta, [E.finestraAperta]: E.finestra };
 const EDGE_TOOLS = [[E.muro, 'Muro'], [E.passaggio, 'Passaggio'], [E.porta, 'Porta'], [E.finestra, 'Finestra'], [E.aperto, 'Aperto'], ['toggle', 'Apri / chiudi']];
+const MODES = [['brush', 'Dipingi tasselli'], ['edge', 'Porte, finestre e passaggi'], ['obj', 'Oggetti, arredo e natura'], ['tok', 'Personaggi']];
 const DOT = ['#ffffff55', '#5fd38a', '#e3a85c', '#6fc3ff', '#e3a85c', '#9fd8ff', '#9fd8ff'];
 // Ogni lato è salvato una volta sola, sul tassello a ovest ("e") o a nord ("s"): i due vicini lo condividono.
 const edgeKey = (x, y, d) => (d === 'n' ? `${x},${y - 1},s` : d === 'w' ? `${x - 1},${y},e` : `${x},${y},${d}`);
@@ -934,7 +949,7 @@ const space = c => SPACE[c?.size] ?? 1;
 function tokensSvg(m, mode) {
   return Object.entries(m.tokens || {}).filter(([cid, t]) => t.lv === m.lvId && S.characters[cid]).map(([cid, t]) => {
     const c = S.characters[cid], mine = mode === 'tok' && (M() || c.owner === S.me.id), s = space(c), n = Math.max(1, s), k = Math.max(s, .3); // k: i piccolissimi restano cliccabili
-    return `<g ${mine ? `data-tok="${cid}"` : ''}><g transform="translate(${t.x + n / 2} ${t.y + n / 2})"><title>${esc(c.name || 'Senza nome')} (${esc(c.size || 'Media')})</title>
+    return `<g data-cid="${cid}" ${mine ? `data-tok="${cid}"` : ''}><g transform="translate(${t.x + n / 2} ${t.y + n / 2})"><title>${esc(c.name || 'Senza nome')} (${esc(c.size || 'Media')})</title>
       <circle r="${.46 * k}" fill="${tokColor(cid)}" stroke="${cid === ui.tokChar && mine ? '#fff' : '#111'}" stroke-width="${.1 * Math.sqrt(k)}"/>
       <text font-size="${.42 * Math.max(k, .5)}" font-weight="800" text-anchor="middle" dominant-baseline="central" fill="#fff" font-family="system-ui, sans-serif">${initials(c)}</text>
       <text y="${.46 * k + .32}" font-size=".34" font-weight="700" text-anchor="middle" dominant-baseline="central" fill="#fff" stroke="#000" stroke-width=".12" paint-order="stroke" font-family="system-ui, sans-serif">${esc((c.name || '').slice(0, 14))}</text></g></g>`;
@@ -952,17 +967,21 @@ function maps() {
   const newBtn = master ? '<button data-do="mapNew">+ Nuova mappa</button>' : '';
   if (!cur) return `<div class="panel"><div class="row">${newBtn}<span class="muted">${master ? 'Crea una mappa per iniziare.' : 'Il master non ha ancora mostrato nessuna mappa.'}</span></div></div>`;
   const picker = `<select id="mappick" aria-label="Mappa" style="width:auto;font-weight:600">${list.map(m => `<option value="${m.id}" ${m === cur ? 'selected' : ''}>${esc(m.name || 'Senza nome')}${master && m.visible ? ' · visibile' : ''}</option>`).join('')}</select>${newBtn}`;
-  const z = ui.mapZoom;
-  const bar = `<div class="mapbar">${picker}<span class="spacer"></span>
-    <button data-do="zoom" data-arg="-1" aria-label="Rimpicciolisci la mappa">−</button><button data-do="zoom" data-arg="0" class="${z ? '' : 'on'}" title="Larga quanto lo spazio">Adatta</button><button data-do="zoom" data-arg="1" aria-label="Ingrandisci la mappa">+</button>
+  const z = ui.mapZoom, placed = Object.keys(cur.tokens || {}).filter(cid => S.characters[cid]);
+  const goTo = placed.length ? `<select id="tokfocus" aria-label="Zoom su un personaggio" style="width:auto"><option value="">🔍 Zoom su…</option>
+    ${placed.map(cid => `<option value="${cid}">${esc(S.characters[cid].name || 'Senza nome')}</option>`).join('')}</select>` : '';
+  const bar = `<div class="mapbar">${picker}${master ? `<button data-do="undo" ${undo.length ? '' : 'disabled'} title="Annulla l'ultima modifica (Ctrl+Z)">↶ Annulla</button>` : ''}<span class="spacer"></span>${goTo}
+    <button data-do="zoom" data-arg="-1" aria-label="Rimpicciolisci la mappa" title="Rimpicciolisci (anche Ctrl + rotellina)">−</button><button data-do="zoom" data-arg="0" class="${z ? '' : 'on'}" title="Larga quanto lo spazio">Adatta</button><button data-do="zoom" data-arg="1" aria-label="Ingrandisci la mappa" title="Ingrandisci (anche Ctrl + rotellina)">+</button>
     <button data-do="mapFull">${ui.mapFull ? 'Esci da tutto schermo' : '⛶ Tutto schermo'}</button></div>`;
+  const side = (d, what) => `<div class="grow grow-${d}"><span><button data-do="grow" data-arg="${d}" data-n="1" data-mid="${cur.id}" title="Aggiungi ${what}">+</button><button data-do="grow" data-arg="${d}" data-n="-1" data-mid="${cur.id}" title="Togli ${what}">−</button></span></div>`;
+  const growable = svg => `<div class="growwrap ${z ? '' : 'fit'}">${side('n', 'una fila di tasselli in alto')}${side('w', 'una colonna di tasselli a sinistra')}${svg}${side('e', 'una colonna di tasselli a destra')}${side('s', 'una fila di tasselli in basso')}</div>`;
   // la tavolozza: accanto alla mappa, oppure staccata dove l'hai trascinata
   const p = ui.palPos, palette = body => `<aside class="palette ${p ? 'floating' : ''} ${ui.palMin ? 'min' : ''}" ${p ? `style="left:${Math.min(p.x, innerWidth - 160)}px;top:${Math.min(p.y, innerHeight - 50)}px"` : ''}>
     <div class="palhead" title="Trascina per spostare gli strumenti"><b>Strumenti</b><span class="spacer"></span>
       ${p ? '<button data-do="palDock" title="Rimetti accanto alla mappa">Aggancia</button>' : ''}<button data-do="palMin" aria-label="${ui.palMin ? 'Mostra' : 'Riduci'} gli strumenti">${ui.palMin ? 'Mostra' : '—'}</button></div>
     ${ui.palMin ? '' : `<div class="palbody" data-sk="pal">${body}</div>`}</aside>`;
-  const stage = (body, svg) => `<div class="panel mapstage ${ui.mapFull ? 'full' : ''}">${bar}
-    <div class="mapbody ${p ? '' : 'docked'}">${palette(body)}<div class="mapscroll" data-sk="map">${svg}</div></div></div>`;
+  const stage = (body, svg, grow) => `<div class="panel mapstage ${ui.mapFull ? 'full' : ''}">${bar}
+    <div class="mapbody ${p ? '' : 'docked'}">${palette(body)}<div class="mapscroll" data-sk="map">${grow ? growable(svg) : svg}</div></div></div>`;
 
   const lv = curLevel(cur), view = levelView(cur, lv);
   const levels = [...cur.levels].sort((a, b) => b.z - a.z); // il piano più alto in cima
@@ -983,7 +1002,7 @@ function maps() {
   if (!master) return stage(`${cur.levels.length > 1 ? levelBar : ''}${tokBar}${movable.length ? `<p class="muted">${tokHint}</p>` : ''}`, mapSvg(view, 'tok'));
 
   const b = ui.brush, ob = ui.obj, mode = ui.mapMode;
-  const M_ = (f, label) => `<div><label>${label}</label><input type="number" class="n" min="1" max="12" data-m="${f}" data-mid="${cur.id}" value="${cur[f]}"></div>`;
+  const M_ = (f, label) => `<div><label>${label}</label><input type="number" class="n" min="1" max="${MAX_TILES}" data-m="${f}" data-mid="${cur.id}" value="${cur[f]}"></div>`;
   let tools, hint;
   if (mode === 'brush') {
     tools = group('Tipo di tassello', KINDS.map(([v, l]) => tool(b.kind === v, 'brushSet', `data-f="kind" data-v="${v}"`, kindIcon(v), l)).join(''))
@@ -997,17 +1016,20 @@ function maps() {
           + `<label class="tool ${WATER.some(([c]) => c === w) ? '' : 'on'}" style="cursor:pointer">${waterIcon(w)}<span>Altro colore</span>
             <input type="color" data-water value="${w}" aria-label="Colore dell'acqua" style="position:absolute;opacity:0;width:1px;height:1px"></label>`);
       })() : '');
-    hint = 'Clic su un tassello per dipingerlo. I corridoi si collegano da soli ai tasselli vicini; tra due stanze apri tu il passaggio.';
+    hint = 'Clic o trascina per dipingere i tasselli; <b>tasto destro</b> per tornare roccia. I corridoi si collegano da soli ai tasselli vicini; tra due stanze apri tu il passaggio.';
   } else if (mode === 'edge') {
     tools = group('Strumento per i lati', EDGE_TOOLS.map(([v, l]) => tool(String(ui.edgeTool) === String(v), 'edgeTool', `data-arg="${v}"`, edgeIcon(v), l)).join(''));
-    hint = 'Clic su un pallino per mettere lo strumento scelto su quel lato, anche sul bordo esterno. Con <b>Apri / chiudi</b> apri e chiudi porte e finestre durante la partita: i giocatori lo vedono subito. <b>Aperto</b> toglie il muro e unisce due stanze grandi in una sala. Trascina una porta o una finestra per spostarla lungo il muro: si aggancia da sola ai muri vicini.';
+    hint = 'Clic su un pallino per mettere lo strumento scelto su quel lato, anche sul bordo esterno. Con <b>Apri / chiudi</b> apri e chiudi porte e finestre durante la partita: i giocatori lo vedono subito. <b>Aperto</b> toglie il muro e unisce due stanze grandi in una sala. Trascina una porta o una finestra per spostarla lungo il muro: si aggancia da sola ai muri vicini. Il <b>tasto destro</b> rimette il muro.';
   } else if (mode === 'tok') {
     tools = tokBar;
     hint = tokHint;
   } else {
     const sample = { ...ob, type: OBJ[ob.type] ? ob.type : 'stairs' };
-    tools = OBJ_GROUPS.map(([g, gl]) => group(gl, Object.entries(OBJ).filter(([, o]) => o[3] === g)
-        .map(([v, [, , l]]) => tool(ob.type === v, 'objSet', `data-f="type" data-v="${v}"`, objIcon({ type: v, ladder: true }), l)).join(''))).join('')
+    // una categoria alla volta, come schede: meno da scorrere
+    const og = OBJ_GROUPS.some(([g]) => g === ui.objGroup) ? ui.objGroup : OBJ[ob.type]?.[3] || 'pass';
+    tools = `<nav class="maptabs sub">${OBJ_GROUPS.map(([g, gl]) => `<button data-do="objGroup" data-arg="${g}" class="${g === og ? 'on' : ''}">${gl}</button>`).join('')}</nav>`
+      + `<div class="toolgroup"><div class="tools">${Object.entries(OBJ).filter(([, o]) => o[3] === og)
+        .map(([v, [, , l]]) => tool(ob.type === v, 'objSet', `data-f="type" data-v="${v}"`, objIcon({ type: v, ladder: true }), l)).join('')}</div></div>`
       + group('Strumenti', tool(ob.type === 'ruin', 'objSet', 'data-f="type" data-v="ruin"', objIcon({ type: 'stairs', ruined: true }), 'Rovina / ripara')
         + tool(ob.type === 'erase', 'objSet', 'data-f="type" data-v="erase"', icon('<path d="M2.5 2.5l5 5M7.5 2.5l-5 5" stroke="#e5484d" stroke-width="1.2" stroke-linecap="round"/>'), 'Gomma'))
       + (OBJ[ob.type] ? group('Opzioni', [
@@ -1017,10 +1039,10 @@ function maps() {
         VEG.has(ob.type) ? VEG_STATES.map(([v, l]) => tool((ob.veg || 'lush') === v, 'objSet', `data-f="veg" data-v="${v}"`, objIcon({ type: ob.type, ruined: v === 'dry', inf: v === 'inf' }), l)).join('')
           : ob.type === 'well' || ((ob.type === 'hole' || ob.type === 'pit') && !ob.ladder) ? '' : tool(ob.ruined, 'objToggle', 'data-f="ruined"', objIcon({ ...sample, ruined: true }), ruinLabel(ob.type)),
       ].join('')) : '');
-    hint = ob.type === 'erase' ? 'Clic su un oggetto per toglierlo.'
+    hint = (ob.type === 'erase' ? 'Clic su un oggetto per toglierlo.'
       : ob.type === 'ruin' ? 'Clic su un oggetto per romperlo o ripararlo, anche durante la partita (le scale diventano inagibili, le piante secche).'
       : 'Clic sul quadretto dove mettere l\'oggetto; trascina un oggetto per spostarlo. Le scale che salgono o scendono, e i buchi nel soffitto o nel pavimento, compaiono da soli (tratteggiati) sul piano collegato.'
-        + (VEG.has(ob.type) ? ' Clic su una pianta uguale già messa per cambiarne lo stato.' : '');
+        + (VEG.has(ob.type) ? ' Clic su una pianta uguale già messa per cambiarne lo stato.' : '')) + ' Il <b>tasto destro</b> toglie un oggetto.';
   }
   return `<div class="panel"><div class="row" style="justify-content:space-between"><h2>Impostazioni della mappa</h2><button data-do="mapDel" data-arg="${cur.id}">Elimina mappa</button></div>
       <div class="grid">
@@ -1036,22 +1058,106 @@ function maps() {
         ${cur.levels.length > 1 ? `<button data-do="levelDel" data-arg="${lv.id}" data-mid="${cur.id}" style="align-self:end">Elimina piano</button>` : ''}
       </div>
       <nav class="maptabs" style="margin-bottom:12px">
-        <button data-do="mapMode" data-arg="brush" class="${mode === 'brush' ? 'on' : ''}">Dipingi tasselli</button>
-        <button data-do="mapMode" data-arg="edge" class="${mode === 'edge' ? 'on' : ''}">Porte, finestre e passaggi</button>
-        <button data-do="mapMode" data-arg="obj" class="${mode === 'obj' ? 'on' : ''}">Oggetti, arredo e natura</button>
-        <button data-do="mapMode" data-arg="tok" class="${mode === 'tok' ? 'on' : ''}">Personaggi</button>
+        ${MODES.map(([v, l], i) => `<button data-do="mapMode" data-arg="${v}" class="${mode === v ? 'on' : ''}" title="Tasto ${i + 1}">${l}<kbd>${i + 1}</kbd></button>`).join('')}
       </nav>
       ${tools}
-      <p class="muted" style="margin-bottom:0">${hint}</p>`, mapSvg(view, mode))}`;
+      <p class="muted">${hint}</p>
+      <p class="muted" style="margin-bottom:0;font-size:12px">Scorciatoie: <b>1–4</b> strumenti · <b>R</b> ruota · <b>Ctrl+Z</b> annulla · <b>Ctrl + rotellina</b> zoom · <b>+ / −</b> ai bordi della mappa per allargarla o stringerla da quel lato.</p>`, mapSvg(view, mode), mode !== 'tok')}`;
 }
 
+// Le mappe com'erano prima di ogni modifica del master, per "Annulla" (i segnalini no: li tiene il server).
+const undo = [];
+const snapshot = () => { undo.push(S.maps); if (undo.length > 50) undo.shift(); };
 function setMaps(f) {
+  snapshot();
   const ms = structuredClone(S.maps || []);
   ms.forEach(levelsOf);
   f(ms);
   S.maps = ms;
   render();
-  act('maps', { maps: ms });
+  return act('maps', { maps: ms });
+}
+
+// Sposta tutto il contenuto della mappa di dx, dy tasselli (per allargarla in alto o a sinistra).
+function shiftMap(m, dx, dy) {
+  const mv = o => Object.fromEntries(Object.entries(o || {}).map(([k, v]) => { const [x, y, ...r] = k.split(','); return [[+x + dx, +y + dy, ...r].join(','), v]; }));
+  for (const l of m.levels) {
+    l.tiles = mv(l.tiles);
+    l.edges = mv(l.edges);
+    for (const o of [...(l.objects || []), ...(l.doors || [])]) { o.x += dx * TILE; o.y += dy * TILE; }
+  }
+}
+// Toglie quello che è rimasto fuori dai bordi; restituisce quanti elementi sono stati tolti.
+function clipMap(m) {
+  const W = m.cols * TILE, H = m.rows * TILE;
+  let lost = 0;
+  const keep = (o, ok) => Object.fromEntries(Object.entries(o || {}).filter(([k]) => { const [x, y] = k.split(',').map(Number); return ok(x, y); }));
+  for (const l of m.levels) {
+    const n = Object.keys(l.tiles || {}).length + (l.objects || []).length;
+    l.tiles = keep(l.tiles, (x, y) => x >= 0 && y >= 0 && x < m.cols && y < m.rows);
+    l.edges = keep(l.edges, (x, y) => x >= -1 && y >= -1 && x < m.cols && y < m.rows); // -1: i lati sul bordo ovest/nord
+    l.objects = (l.objects || []).filter(o => { const [fw, fh] = footprint(o); return o.x >= 0 && o.y >= 0 && o.x + fw <= W && o.y + fh <= H; });
+    l.doors = (l.doors || []).filter(d => d.x >= 0 && d.y >= 0 && d.x <= W && d.y <= H);
+    lost += n - Object.keys(l.tiles).length - l.objects.length;
+  }
+  return lost;
+}
+// + o − su un lato: una fila o colonna di tasselli in più o in meno da quella parte.
+function resizeMap(m, d, n) {
+  const horiz = d === 'w' || d === 'e';
+  if (horiz) m.cols += n; else m.rows += n;
+  if (d === 'w' || d === 'n') shiftMap(m, horiz ? n : 0, horiz ? 0 : n);
+  return clipMap(m);
+}
+
+// Dipinge il tassello tx,ty del piano (o lo rimette roccia).
+function paintTile(lv, tx, ty, erase) {
+  lv.tiles ??= {};
+  lv.edges ??= {};
+  const { kind, w, terrain } = ui.brush, key = tx + ',' + ty;
+  if (erase || kind === 'vuoto') {
+    delete lv.tiles[key];
+    for (const d of 'nesw') delete lv.edges[edgeKey(tx, ty, d)];
+    return;
+  }
+  lv.tiles[key] = { kind, w: num(w), terrain, ...(terrain === 'acqua' && { water: hex(ui.brush.water) }) };
+  // un corridoio si collega da solo a ciò che ha accanto (e una stanza ai corridoi vicini)
+  for (const [d, nx, ny] of [['n', tx, ty - 1], ['s', tx, ty + 1], ['w', tx - 1, ty], ['e', tx + 1, ty]]) {
+    const n = lv.tiles[nx + ',' + ny];
+    if (n && (kind === 'corr' || n.kind === 'corr') && !lv.edges[edgeKey(tx, ty, d)]) lv.edges[edgeKey(tx, ty, d)] = 1;
+  }
+}
+
+// Zoom tenendo fermo il punto sotto (cx, cy): il puntatore, o il centro della mappa.
+const zoomNow = () => { const svg = $('.mapscroll svg'); return ui.mapZoom || svg.getBoundingClientRect().width / svg.viewBox.baseVal.width; };
+const zoomStep = f => Math.round(Math.min(80, Math.max(6, zoomNow() * f)));
+function zoomTo(z, cx, cy) {
+  const sc = $('.mapscroll'), r = sc.getBoundingClientRect(), a = sc.querySelector('svg').getBoundingClientRect();
+  cx ??= r.left + sc.clientWidth / 2;
+  cy ??= r.top + sc.clientHeight / 2;
+  const fx = (cx - a.left) / a.width, fy = (cy - a.top) / a.height;
+  ui.mapZoom = z;
+  saveUi();
+  render();
+  const n = $('.mapscroll'), b = n.querySelector('svg').getBoundingClientRect();
+  n.scrollLeft += b.left + fx * b.width - cx;
+  n.scrollTop += b.top + fy * b.height - cy;
+}
+// Porta il segnalino al centro della vista, ingrandito, e lo fa lampeggiare.
+function focusTok(cid) {
+  const m = S.maps.find(x => x.id === ui.mapId) || S.maps[0], t = m?.tokens?.[cid];
+  if (!t) return;
+  ui.levels = { ...ui.levels, [m.id]: t.lv };
+  ui.mapZoom = Math.max(ui.mapZoom, 56);
+  saveUi();
+  render();
+  const sc = $('.mapscroll'), g = sc.querySelector(`[data-cid="${cid}"]`);
+  if (!g) return;
+  sc.scrollIntoView({ block: 'nearest' });
+  const r = g.getBoundingClientRect(), s = sc.getBoundingClientRect();
+  sc.scrollLeft += r.left + r.width / 2 - (s.left + sc.clientWidth / 2);
+  sc.scrollTop += r.top + r.height / 2 - (s.top + sc.clientHeight / 2);
+  g.classList.add('ping');
 }
 
 // Sposta un segnalino subito in locale, poi lo manda al server.
@@ -1068,7 +1174,8 @@ function moveToken(mid, cid, pos) {
   act('token', pos ? { map: mid, char: cid, ...pos } : { map: mid, char: cid, remove: true });
 }
 
-function mapClick(e) {
+// erase: tasto destro, toglie invece di mettere
+function mapClick(e, erase) {
   if (dragged) return;
   const svg = e.target.closest('#mapsvg'), m = S.maps.find(x => x.id === svg.dataset.id);
   if (!M() || ui.mapMode === 'tok') {
@@ -1077,9 +1184,8 @@ function mapClick(e) {
     const [sx, sy] = toMap(svg, e), off = Math.floor((Math.max(1, space(c)) - 1) / 2); // il quadretto cliccato sta al centro
     return moveToken(m.id, c.id, { lv: curLevel(m).id, x: Math.floor(sx) - off, y: Math.floor(sy) - off });
   }
-  const r = svg.getBoundingClientRect(), W = m.cols * TILE, H = m.rows * TILE;
-  // il viewBox ha mezzo quadretto di margine per lato
-  const sx = (e.clientX - r.left) / r.width * (W + 1) - .5, sy = (e.clientY - r.top) / r.height * (H + 1) - .5;
+  if (ui.mapMode === 'brush') return; // i tasselli si dipingono con il puntatore premuto (sotto)
+  const [sx, sy] = toMap(svg, e), W = m.cols * TILE, H = m.rows * TILE;
   const tx = Math.min(m.cols - 1, Math.max(0, Math.floor(sx / TILE))), ty = Math.min(m.rows - 1, Math.max(0, Math.floor(sy / TILE)));
   setMaps(ms => {
     const map = ms.find(x => x.id === m.id), lv = curLevel(map);
@@ -1091,7 +1197,7 @@ function mapClick(e) {
       const inside = o => { const [fw, fh] = footprint(o); return qx >= o.x && qx < o.x + fw && qy >= o.y && qy < o.y + fh; };
       let hit = lv.objects.findLastIndex(o => !FLAT.has(o.type) && inside(o)); // i tappeti stanno sotto: prima ciò che c'è sopra
       if (hit < 0) hit = lv.objects.findLastIndex(inside);
-      const { type, rot, dir, ruined, ladder, veg = 'lush' } = ui.obj, h = lv.objects[hit];
+      const { rot, dir, ruined, ladder, veg = 'lush' } = ui.obj, type = erase ? 'erase' : ui.obj.type, h = lv.objects[hit];
       if (type === 'erase') { if (hit >= 0) lv.objects.splice(hit, 1); return; }
       if (type === 'ruin') { if (h && h.type !== 'well') { h.ruined = !h.ruined; delete h.inf; } return; }
       if (!OBJ[type]) return;
@@ -1108,8 +1214,9 @@ function mapClick(e) {
     if (ui.mapMode === 'edge') {
       // prima le porte spostate a mano: apri/chiudi, cambia in porta o finestra, oppure togli (muro)
       const fd = (lv.doors || []).findIndex(dr => (dr.v ? Math.abs(sx - dr.x) < .6 && sy > dr.y && sy < dr.y + dr.n : Math.abs(sy - dr.y) < .6 && sx > dr.x && sx < dr.x + dr.n));
+      const t = erase ? E.muro : ui.edgeTool;
       if (fd >= 0) {
-        const dr = lv.doors[fd], t = ui.edgeTool;
+        const dr = lv.doors[fd];
         if (t === 'toggle') dr.s = TOGGLE[dr.s] ?? dr.s;
         else if (GLYPH.has(num(t))) dr.s = num(t);
         else lv.doors.splice(fd, 1);
@@ -1119,24 +1226,45 @@ function mapClick(e) {
       const lx = sx - tx * TILE, ly = sy - ty * TILE;
       const d = [['w', lx], ['e', TILE - lx], ['n', ly], ['s', TILE - ly]].sort((a, b) => a[1] - b[1])[0][0];
       const k = edgeKey(tx, ty, d), cur = lv.edges[k] || 0;
-      const next = ui.edgeTool === 'toggle' ? TOGGLE[cur] ?? cur : num(ui.edgeTool);
+      const next = t === 'toggle' ? TOGGLE[cur] ?? cur : num(t);
       if (next) lv.edges[k] = next; else delete lv.edges[k];
-      return;
-    }
-    const { kind, w, terrain } = ui.brush, key = tx + ',' + ty;
-    if (kind === 'vuoto') {
-      delete lv.tiles[key];
-      for (const d of 'nesw') delete lv.edges[edgeKey(tx, ty, d)];
-      return;
-    }
-    lv.tiles[key] = { kind, w: num(w), terrain, ...(terrain === 'acqua' && { water: hex(ui.brush.water) }) };
-    // un corridoio si collega da solo a ciò che ha accanto (e una stanza ai corridoi vicini)
-    for (const [d, nx, ny] of [['n', tx, ty - 1], ['s', tx, ty + 1], ['w', tx - 1, ty], ['e', tx + 1, ty]]) {
-      const n = lv.tiles[nx + ',' + ny];
-      if (n && (kind === 'corr' || n.kind === 'corr') && !lv.edges[edgeKey(tx, ty, d)]) lv.edges[edgeKey(tx, ty, d)] = 1;
     }
   });
 }
+
+// Pennello: premi e trascina per dipingere più tasselli (tasto destro: roccia); si salva una volta sola al rilascio.
+let paint = null;
+function paintMove(e) {
+  const svg = $('#mapsvg'), m = S.maps.find(x => x.id === paint.mid), [sx, sy] = toMap(svg, e);
+  const tx = Math.floor(sx / TILE), ty = Math.floor(sy / TILE), k = tx + ',' + ty;
+  if (tx < 0 || ty < 0 || tx >= m.cols || ty >= m.rows || paint.done.has(k)) return;
+  paint.done.add(k);
+  paintTile(curLevel(m), tx, ty, paint.erase);
+  render(true);
+}
+addEventListener('pointerdown', e => {
+  const svg = e.target.closest?.('#mapsvg');
+  if (!svg || !M() || ui.mapMode !== 'brush' || (e.button !== 0 && e.button !== 2)) return;
+  snapshot();
+  S.maps = structuredClone(S.maps);
+  S.maps.forEach(levelsOf);
+  paint = { mid: svg.dataset.id, erase: e.button === 2, done: new Set() };
+  paintMove(e);
+});
+addEventListener('pointermove', e => { if (paint) paintMove(e); });
+const paintEnd = () => { if (!paint) return; paint = null; act('maps', { maps: S.maps }); };
+addEventListener('pointerup', paintEnd);
+addEventListener('pointercancel', paintEnd); // sul telefono il dito che scorre la mappa non dipinge
+addEventListener('contextmenu', e => {
+  if (!e.target.closest?.('#mapsvg') || !M() || ui.mapMode === 'tok') return;
+  e.preventDefault();
+  mapClick(e, true);
+});
+addEventListener('wheel', e => {
+  if (!e.ctrlKey || !e.target.closest?.('.mapscroll')) return;
+  e.preventDefault(); // Ctrl + rotellina (o il pizzico sul touchpad) ingrandisce la mappa, non la pagina
+  zoomTo(zoomStep(e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX, e.clientY);
+}, { passive: false });
 
 // Trascinare un oggetto lo sposta, trascinare una porta o finestra la fa scorrere lungo i muri; un clic senza movimento resta un clic.
 let drag = null, dragged = false;
@@ -1229,9 +1357,10 @@ function setDice(open) {
   if (open) $('#toast').classList.remove('show');
 }
 
-function render() {
+// force: ridisegna anche a pulsante premuto (il pennello che dipinge mentre trascini)
+function render(force) {
   if (!S) return;
-  if (pressed) { pending = true; return; }
+  if (pressed && !force) { pending = true; return; }
   $('nav').innerHTML = [['sheets', 'Schede'], ['combat', 'Combattimento'], ['handouts', M() ? 'Handout e note' : 'Handout'], ['story', 'Storia'], ['maps', 'Mappe']]
     .map(([t, l]) => `<button data-do="tab" data-arg="${t}" class="${ui.tab === t ? 'on' : ''}">${l}</button>`).join('');
   const campName = S.campaigns.find(c => c.id === S.active)?.name;
@@ -1311,17 +1440,30 @@ const handlers = {
   }),
   tDel: a => setTracker(t => { if (+a < t.turn) t.turn--; t.list.splice(+a, 1); }),
   tReset: () => confirm('Terminare il combattimento e svuotare il tracker?') && setTracker(t => { t.list = []; t.round = 1; t.turn = 0; }),
-  zoom: a => {
-    // tiene al centro lo stesso punto della mappa
-    const sc = $('.mapscroll'), svg = sc.querySelector('svg'), now = ui.mapZoom || svg.getBoundingClientRect().width / svg.viewBox.baseVal.width;
-    const fx = (sc.scrollLeft + sc.clientWidth / 2) / sc.scrollWidth, fy = (sc.scrollTop + sc.clientHeight / 2) / sc.scrollHeight;
-    ui.mapZoom = +a ? Math.round(Math.min(80, Math.max(6, now * (+a > 0 ? 1.25 : .8)))) : 0;
-    saveUi();
+  zoom: a => zoomTo(+a ? zoomStep(+a > 0 ? 1.25 : .8) : 0),
+  undo: () => {
+    const prev = undo.pop();
+    if (!prev) return;
+    const ms = structuredClone(prev);
+    ms.forEach(m => { m.tokens = S.maps.find(x => x.id === m.id)?.tokens; });
+    S.maps = ms;
     render();
-    const n = $('.mapscroll');
-    n.scrollLeft = fx * n.scrollWidth - n.clientWidth / 2;
-    n.scrollTop = fy * n.scrollHeight - n.clientHeight / 2;
+    act('maps', { maps: ms });
   },
+  async grow(a, d) {
+    const m0 = S.maps.find(x => x.id === d.mid), n = +d.n, size = a === 'w' || a === 'e' ? m0.cols : m0.rows;
+    if (size + n < 1 || size + n > MAX_TILES) return alert(`La mappa va da 1 a ${MAX_TILES} tasselli per lato.`);
+    // togliere una fila cancella quello che c'era sopra: prima chiedi
+    const probe = structuredClone(m0);
+    levelsOf(probe);
+    const lost = n < 0 ? resizeMap(probe, a, n) : 0;
+    if (lost && !confirm(`Su questa fila ci sono ${lost} tra tasselli e oggetti: verranno cancellati. Continuare?`)) return;
+    await setMaps(ms => resizeMap(ms.find(x => x.id === d.mid), a, n));
+    // i segnalini li tiene il server: si spostano con la mappa (dopo il salvataggio, così stanno nei nuovi bordi)
+    const dx = a === 'w' ? n * TILE : 0, dy = a === 'n' ? n * TILE : 0;
+    for (const [cid, t] of Object.entries(m0.tokens || {})) if (dx || dy || n < 0) moveToken(m0.id, cid, { ...t, x: t.x + dx, y: t.y + dy });
+  },
+  objGroup: a => { ui.objGroup = a; saveUi(); render(); },
   mapFull: () => {
     ui.mapFull = !ui.mapFull;
     // anche il browser a tutto schermo, se lo permette; Esc esce da entrambi
@@ -1372,6 +1514,13 @@ const handlers = {
 };
 
 addEventListener('keydown', e => {
+  // scorciatoie dell'editor delle mappe (non mentre scrivi in un campo)
+  if (S && ui.tab === 'maps' && M() && !e.altKey && !e.target.closest?.('input, textarea, select')) {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); return handlers.undo(); }
+    const mode = !e.ctrlKey && !e.metaKey && MODES[+e.key - 1]?.[0];
+    if (mode) return handlers.mapMode(mode);
+    if (e.key.toLowerCase() === 'r' && !e.ctrlKey && !e.metaKey && ui.mapMode === 'obj') return handlers.objRotate();
+  }
   if (e.key !== 'Escape') return;
   setDice(false);
   if (ui.mapFull && !document.fullscreenElement) { ui.mapFull = false; render(); }
@@ -1430,12 +1579,13 @@ document.addEventListener('change', e => {
   else if (el.id === 'story') act('story', { story: val });
   else if (d.m) setMaps(ms => {
     const m = ms.find(x => x.id === d.mid);
-    m[d.m] = d.m === 'cols' || d.m === 'rows' ? Math.min(12, Math.max(1, parseInt(val) || 1)) : val;
+    m[d.m] = d.m === 'cols' || d.m === 'rows' ? Math.min(MAX_TILES, Math.max(1, parseInt(val) || 1)) : val;
   });
   else if ('water' in d) { ui.brush = { ...ui.brush, water: hex(val) }; saveUi(); render(); }
   else if (d.lv) setMaps(ms => { const l = ms.find(x => x.id === d.mid).levels.find(x => x.id === d.lid); l.name = val || l.name; });
   else if (el.id === 'campsel') act('campaign.select', { id: val });
   else if (el.id === 'mappick') { ui.mapId = val; saveUi(); render(); }
+  else if (el.id === 'tokfocus') { if (val) focusTok(val); }
 });
 
 $('#rollform').addEventListener('submit', async e => {
