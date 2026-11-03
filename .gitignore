@@ -1,0 +1,9 @@
+# Dati della partita (account, PIN, schede): restano sul PC che ospita il tavolo
+data.json
+data.json.tmp
+# L'exe si ricrea con "npm run build" (o aggiorna.cmd)
+TavoloDnD.exe
+TavoloDnD
+sea-prep.blob
+sea-config.json
+node_modules/

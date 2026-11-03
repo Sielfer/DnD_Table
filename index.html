@@ -1,0 +1,648 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tavolo D&amp;D 3.5</title>
+<style>
+:root {
+  --bg: #f5f6fa; --panel: #ffffff; --field: #f1f3f8; --ink: #1b1e2b; --muted: #6a7086; --line: #e4e7ef;
+  --accent: #6d4aff; --accent-ink: #ffffff; --accent-soft: #eee9ff; --gold: #b7791f; --cur: #fff6dc;
+  --shadow: 0 1px 2px rgb(20 20 40 / .05), 0 6px 24px rgb(20 20 40 / .06);
+  --radius: 14px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1016; --panel: #161922; --field: #1d212d; --ink: #e8eaf2; --muted: #8c92a8; --line: #272b38;
+    --accent: #9b85ff; --accent-ink: #120d24; --accent-soft: #261f45; --gold: #f2c14e; --cur: #2f2814;
+    --shadow: 0 1px 2px rgb(0 0 0 / .4), 0 8px 28px rgb(0 0 0 / .25);
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; min-height: 100vh; min-height: 100dvh; background: var(--bg); color: var(--ink);
+  font: 14px/1.45 "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+::selection { background: var(--accent-soft); }
+
+/* --- Barra in alto --- */
+header {
+  position: sticky; top: 0; z-index: 5; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+  padding: 10px 20px; border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 82%, transparent); backdrop-filter: blur(12px);
+}
+header h1 { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 700; margin: 0 8px 0 0; letter-spacing: -.01em; }
+.logo {
+  display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; font-size: 11px; font-weight: 800;
+  color: var(--accent-ink); background: linear-gradient(135deg, var(--accent), #c04dff);
+}
+nav { display: flex; gap: 2px; padding: 3px; background: var(--field); border-radius: 11px; }
+nav button { background: transparent; border: 0; color: var(--muted); padding: 6px 14px; border-radius: 8px; }
+nav button:hover:not(:disabled) { background: transparent; color: var(--ink); }
+nav button.on { background: var(--panel); color: var(--ink); box-shadow: var(--shadow); }
+#who { font-size: 13px; }
+
+/* --- Layout --- */
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; padding: 20px; max-width: 1600px; margin: 0 auto; align-items: start; }
+.layout > aside { position: sticky; top: 76px; }
+.sheetwrap { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 20px; align-items: start; }
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 0 16px; }
+/* colonne più larghe dove ci sono tabelle (tiri salvezza, incantesimi), così non serve la barra di scorrimento */
+.cols.wide { grid-template-columns: repeat(auto-fit, minmax(min(440px, 100%), 1fr)); }
+
+/* --- Pannelli --- */
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; margin-bottom: 16px; box-shadow: var(--shadow); }
+h2 { font-size: 15px; font-weight: 700; margin: 0 0 12px; letter-spacing: -.01em; }
+.panel > h2:first-child::before, .panel > .row:first-child > h2::before {
+  content: ""; display: inline-block; width: 4px; height: 14px; margin-right: 8px; vertical-align: -2px; border-radius: 2px; background: var(--accent);
+}
+label { display: block; margin-bottom: 4px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.muted { color: var(--muted); }
+small { font-size: 12px; }
+
+/* --- Campi --- */
+input, select, textarea, button { font: inherit; color: inherit; }
+input, select, textarea {
+  width: 100%; min-width: 0; padding: 7px 10px; background: var(--field); border: 1px solid transparent; border-radius: 9px;
+  transition: border-color .15s, box-shadow .15s, background .15s;
+}
+input:hover, select:hover, textarea:hover { border-color: var(--line); }
+input:focus, select:focus, textarea:focus { outline: none; background: var(--panel); border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+input::placeholder, textarea::placeholder { color: var(--muted); opacity: .7; }
+input[type=checkbox] { width: 16px; height: 16px; padding: 0; accent-color: var(--accent); cursor: pointer; }
+input[type=number] { -moz-appearance: textfield; }
+input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+input.n { width: 64px; text-align: center; font-variant-numeric: tabular-nums; }
+td input { min-width: 56px; }
+textarea { min-height: 90px; resize: vertical; line-height: 1.5; }
+fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+fieldset:disabled input, fieldset:disabled select, fieldset:disabled textarea { background: transparent; border-color: var(--line); }
+
+/* --- Bottoni --- */
+button {
+  padding: 7px 14px; background: var(--field); border: 1px solid var(--line); border-radius: 9px; font-weight: 500; cursor: pointer;
+  transition: background .15s, border-color .15s, transform .05s;
+}
+button:hover:not(:disabled) { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+button:active:not(:disabled) { transform: translateY(1px); }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button:disabled { opacity: .55; cursor: default; }
+button.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+button.on:hover:not(:disabled) { background: var(--accent); filter: brightness(1.08); }
+.roll {
+  min-width: 52px; padding: 5px 10px; border: 0; border-radius: 999px; font-weight: 700; font-variant-numeric: tabular-nums;
+  background: var(--accent-soft); color: var(--accent);
+}
+.roll:hover:not(:disabled) { background: var(--accent); color: var(--accent-ink); }
+td button[aria-label] { padding: 4px 8px; }
+
+/* --- Elenco personaggi --- */
+.charlist button { display: block; width: 100%; text-align: left; margin-bottom: 6px; background: transparent; border-color: transparent; }
+.charlist button:hover:not(:disabled) { background: var(--field); border-color: transparent; }
+.charlist button.on { background: var(--accent-soft); color: var(--accent); border-color: transparent; font-weight: 600; }
+.charlist button.on small { color: var(--accent); opacity: .8; }
+.charlist button small { color: var(--muted); }
+.charlist button[data-do=newChar] { margin-top: 10px; border: 1px dashed var(--line); text-align: center; color: var(--muted); }
+
+/* --- Tabelle --- */
+.scroll { overflow-x: auto; margin: 0 -4px; padding: 0 4px; }
+table { border-collapse: collapse; width: 100%; }
+td, th { padding: 5px 6px; text-align: left; vertical-align: middle; }
+th { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+tr + tr > td, tr + tr > th { border-top: 1px solid var(--line); }
+tr.cur > td { background: var(--cur); }
+tr.cur > td:first-child { box-shadow: inset 3px 0 var(--gold); color: var(--gold); font-weight: 700; }
+
+/* --- Numeri in evidenza --- */
+.big { font-size: 22px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+.pre { white-space: pre-wrap; line-height: 1.6; }
+.crit { display: inline-block; margin-top: 4px; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; color: var(--gold); background: color-mix(in srgb, var(--gold) 15%, transparent); }
+
+/* --- Dadi --- */
+#rollform { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; margin-bottom: 10px; }
+#rollform button { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.dice { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 12px; }
+.dice button { padding: 7px 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+#secretwrap { display: flex; gap: 8px; align-items: center; text-transform: none; letter-spacing: 0; font-size: 13px; font-weight: 500; }
+#secretwrap[hidden] { display: none; }
+.log { max-height: 60vh; overflow: auto; margin: 0 -6px; padding: 0 6px; }
+.log > div { padding: 10px 12px; margin-bottom: 8px; background: var(--field); border-radius: 11px; }
+.tot { float: right; margin-left: 8px; font-size: 22px; font-weight: 800; line-height: 1.1; color: var(--accent); font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* --- Login --- */
+#login { max-width: 400px; margin: 14vh auto; padding: 28px; }
+#login h2::before { display: none; }
+#login h2 { display: flex; align-items: center; gap: 10px; font-size: 20px; }
+#login button { width: 100%; margin-top: 12px; padding: 10px; background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+
+/* --- Scrollbar --- */
+* { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+
+/* --- Schermi stretti e touch (in fondo, così prevalgono sulle regole sopra) --- */
+#dicefab, #scrim, #toast, #diceclose { display: none; }
+@media (max-width: 1100px) {
+  .layout, .sheetwrap { grid-template-columns: minmax(0, 1fr); }
+  .layout { padding-bottom: 96px; }
+  .sheetwrap { gap: 0; }
+  /* Personaggi: una fila di "chip" scorrevole invece di una colonna */
+  .charlist { display: flex; gap: 6px; align-items: center; overflow-x: auto; padding: 10px; }
+  .charlist h2 { display: none; }
+  .charlist button, .charlist button[data-do=newChar] { width: auto; flex: none; margin: 0; white-space: nowrap; }
+  /* Dadi: pannello che sale dal basso, aperto dal bottone flottante */
+  .layout > aside {
+    position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 30; margin: 0;
+    max-height: 85dvh; overflow: auto; overscroll-behavior: contain;
+    border-radius: var(--radius) var(--radius) 0 0; padding-bottom: calc(18px + env(safe-area-inset-bottom));
+    transform: translateY(105%); visibility: hidden; transition: transform .25s ease, visibility 0s .25s;
+  }
+  body.dice-open .layout > aside { transform: none; visibility: visible; transition: transform .25s ease; }
+  .layout > aside .log { max-height: none; overflow: visible; }
+  #diceclose { display: inline-block; padding: 4px 10px; }
+  #dicefab {
+    display: grid; place-items: center; position: fixed; z-index: 20; right: calc(16px + env(safe-area-inset-right)); bottom: calc(16px + env(safe-area-inset-bottom));
+    width: 56px; height: 56px; padding: 0; border: 0; border-radius: 50%; font-size: 24px;
+    background: var(--accent); color: var(--accent-ink); box-shadow: 0 6px 20px rgb(0 0 0 / .25);
+  }
+  #dicefab:hover:not(:disabled) { background: var(--accent); filter: brightness(1.08); }
+  body.dice-open #scrim { display: block; position: fixed; inset: 0; z-index: 25; background: rgb(0 0 0 / .4); }
+  #toast {
+    display: block; position: fixed; z-index: 20; left: 16px; right: 88px; bottom: calc(20px + env(safe-area-inset-bottom));
+    padding: 10px 14px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow);
+    opacity: 0; transform: translateY(8px); pointer-events: none; transition: opacity .2s, transform .2s;
+  }
+  #toast.show { opacity: 1; transform: none; pointer-events: auto; cursor: pointer; }
+}
+@media (max-width: 700px) {
+  header { padding: 8px 12px; gap: 8px; position: static; }
+  header h1 { margin: 0; }
+  #camp { order: 5; width: 100%; flex-wrap: nowrap; }
+  #camp select { flex: 1; width: 0 !important; }
+  #camp button { flex: none; }
+  nav { order: 6; width: 100%; overflow-x: auto; }
+  nav button { flex: 1; white-space: nowrap; padding: 6px 10px; }
+  #who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .layout { padding: 12px 12px 96px; gap: 12px; }
+  .panel { padding: 14px; margin-bottom: 12px; }
+  /* 16px evita lo zoom automatico di iOS quando si tocca un campo */
+  input, select, textarea { font-size: 16px; }
+  input.n { width: 56px; }
+  .big { font-size: 19px; }
+  #login { margin: 8vh auto; width: calc(100% - 32px); padding: 22px; }
+}
+@media (max-width: 480px) {
+  header h1 .title { display: none; }
+  nav button { padding: 6px 6px; font-size: 13px; }
+  .grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
+}
+/* Schermi touch: bersagli più grandi */
+@media (pointer: coarse) {
+  button, select, input:not([type=checkbox]) { min-height: 40px; }
+  input[type=checkbox] { width: 22px; height: 22px; }
+  .roll { min-width: 56px; }
+}
+</style>
+</head>
+<body>
+
+<div id="login" class="panel" hidden>
+  <h2><span class="logo">d20</span>Tavolo D&amp;D 3.5</h2>
+  <form id="loginform">
+    <label for="lname">Nome</label><input id="lname" name="name" required maxlength="40" autocomplete="username">
+    <label for="lpin" style="margin-top:12px">PIN</label><input id="lpin" name="pin" type="password" required minlength="4" autocomplete="current-password">
+    <p class="muted">Prima volta? Scegli nome e PIN: l'account viene creato. Il master entra con il nome "Master".</p>
+    <button>Entra</button> <p id="lerr" role="alert" style="color:#e5484d;margin:8px 0 0"></p>
+  </form>
+</div>
+
+<div id="app" hidden>
+  <header>
+    <h1><span class="logo">d20</span><span class="title">Tavolo D&amp;D 3.5</span></h1>
+    <span id="camp" class="row" style="gap:6px"></span>
+    <nav></nav>
+    <span style="flex:1"></span>
+    <span id="who" class="muted"></span>
+    <button data-do="logout">Esci</button>
+  </header>
+  <div class="layout">
+    <main id="main"></main>
+    <aside class="panel" id="dicepanel" aria-label="Dadi">
+      <div class="row" style="justify-content:space-between"><h2>Dadi</h2><button type="button" id="diceclose" data-do="diceToggle" aria-label="Chiudi">✕</button></div>
+      <form id="rollform">
+        <input id="expr" placeholder="1d20+5" aria-label="Espressione">
+        <input id="rlabel" placeholder="Motivo" aria-label="Motivo">
+        <button>Tira</button>
+      </form>
+      <div class="dice">
+        <button data-qd="1d4">d4</button><button data-qd="1d6">d6</button><button data-qd="1d8">d8</button><button data-qd="1d10">d10</button>
+        <button data-qd="1d12">d12</button><button data-qd="1d20">d20</button><button data-qd="1d100">d100</button>
+      </div>
+      <label id="secretwrap" hidden style="margin-bottom:8px"><input type="checkbox" id="secret"> tiro segreto (solo master)</label>
+      <div id="log" class="log" aria-live="polite"></div>
+    </aside>
+  </div>
+  <div id="scrim"></div>
+  <div id="toast" role="status"></div>
+  <button id="dicefab" data-do="diceToggle" aria-label="Dadi" aria-controls="dicepanel">🎲</button>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const num = v => Number(v) || 0;
+const mod = s => Math.floor((num(s) - 10) / 2);
+const sgn = n => (n >= 0 ? '+' : '') + n;
+const get = (o, p) => p.reduce((a, k) => a?.[k], o);
+const rid = () => Math.random().toString(36).slice(2, 10);
+
+const ABIL = { str: 'FOR', dex: 'DES', con: 'COS', int: 'INT', wis: 'SAG', cha: 'CAR' };
+const ABOPTS = Object.entries(ABIL);
+// [mod. CA/attacco, mod. lotta]
+const SIZES = { Piccolissima: [8, -16], Minuta: [4, -12], Minuscola: [2, -8], Piccola: [1, -4], Media: [0, 0], Grande: [-1, 4], Enorme: [-2, 8], Mastodontica: [-4, 12], Colossale: [-8, 16] };
+// [nome, caratteristica, penalità armatura]
+const SKILLS = [
+  ['Acrobazia', 'dex', 1], ['Addestrare Animali', 'cha'], ['Artigianato ()', 'int'], ['Artista della Fuga', 'dex', 1], ['Ascoltare', 'wis'],
+  ['Camuffare', 'cha'], ['Cavalcare', 'dex'], ['Cercare', 'int'], ['Concentrazione', 'con'],
+  ['Conoscenze (arcane)', 'int'], ['Conoscenze (architettura e ingegneria)', 'int'], ['Conoscenze (dungeon)', 'int'], ['Conoscenze (geografia)', 'int'],
+  ['Conoscenze (locali)', 'int'], ['Conoscenze (natura)', 'int'], ['Conoscenze (nobiltà e regalità)', 'int'], ['Conoscenze (piani)', 'int'],
+  ['Conoscenze (religioni)', 'int'], ['Conoscenze (storia)', 'int'], ['Decifrare Scritture', 'int'], ['Diplomazia', 'cha'],
+  ['Disattivare Congegni', 'int'], ['Equilibrio', 'dex', 1], ['Falsificare', 'int'], ['Guarire', 'wis'], ['Intimidire', 'cha'],
+  ['Intrattenere ()', 'cha'], ['Muoversi Silenziosamente', 'dex', 1], ['Nascondersi', 'dex', 1], ['Nuotare', 'str', 1], ['Osservare', 'wis'],
+  ['Percepire Intenzioni', 'wis'], ['Professione ()', 'wis'], ['Raccogliere Informazioni', 'cha'], ['Raggirare', 'cha'],
+  ['Rapidità di Mano', 'dex', 1], ['Saltare', 'str', 1], ['Sapienza Magica', 'int'], ['Scalare', 'str', 1], ['Scassinare Serrature', 'dex'],
+  ['Sopravvivenza', 'wis'], ['Utilizzare Corde', 'dex'], ['Utilizzare Oggetti Magici', 'cha'], ['Valutare', 'int'],
+];
+
+let S = null;
+let ui = { tab: 'sheets', charId: null };
+try { Object.assign(ui, JSON.parse(localStorage.getItem('ui') || '{}')); } catch {}
+const saveUi = () => { try { localStorage.setItem('ui', JSON.stringify(ui)); } catch {} };
+const M = () => S.me.role === 'master';
+const canEdit = c => M() || c.owner === S.me.id;
+
+async function act(type, data = {}) {
+  const r = await fetch('/api/action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type, ...data }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) alert(j.error || 'Errore');
+  return j;
+}
+
+// --- Regole 3.5 ---
+function calc(c) {
+  const ab = k => { const a = c.abil?.[k] || {}; return mod(a.temp !== undefined && a.temp !== '' ? a.temp : (a.score === undefined || a.score === '' ? 10 : a.score)); };
+  const [sz, gsz] = SIZES[c.size] || SIZES.Media;
+  const a = c.ac || {};
+  const dex = a.maxDex !== undefined && a.maxDex !== '' ? Math.min(ab('dex'), num(a.maxDex)) : ab('dex');
+  const ac = 10 + num(a.armor) + num(a.shield) + dex + sz + num(a.natural) + num(a.deflection) + num(a.misc);
+  // "+7/+5/+3": il primo è il BAB usato nei calcoli, gli altri sono gli attacchi aggiuntivi
+  const babs = String(c.bab ?? '').match(/[+-]?\d+/g)?.map(Number) || [0], bab = babs[0];
+  // punti abilità 3.5: (punti di classe + mod. INT base, min. 1) × (livello + 3); gli Umani +1 a livello (+4 al 1°)
+  const lvl = num(c.level);
+  const perLevel = Math.max(1, num(c.skillPts) + mod(c.abil?.int?.score || 10)) + (/^\s*uman[oaie]\b/i.test(c.race || '') ? 1 : 0);
+  const save = (k, abil) => num(c.saves?.[k]?.base) + ab(abil) + num(c.saves?.[k]?.magic) + num(c.saves?.[k]?.misc);
+  return {
+    ab, ac, bab, babs,
+    touch: 10 + dex + sz + num(a.deflection) + num(a.misc),
+    ff: ac - Math.max(0, dex),
+    init: ab('dex') + num(c.initMisc),
+    melee: bab + ab('str') + sz,
+    ranged: bab + ab('dex') + sz,
+    grapple: bab + ab('str') + gsz + num(c.grappleMisc),
+    fort: save('fort', 'con'), ref: save('ref', 'dex'), will: save('will', 'wis'),
+    acp: num(a.acp),
+    skillTot: (lvl ? perLevel * (lvl + 3) : 0) + num(c.skillMisc),
+    // abilità non di classe: 2 punti per grado
+    skillUsed: (c.skills || []).reduce((t, s) => t + num(s.ranks) * (s.cls ? 1 : 2), 0),
+  };
+}
+
+// Campo della scheda legato a un percorso nel personaggio.
+function I(c, p, o = {}) {
+  const v = get(c, p) ?? o.def ?? '';
+  const at = `data-c="${c.id}" data-p="${esc(JSON.stringify(p))}" aria-label="${esc(o.aria || p.join(' '))}"`;
+  if (o.area) return `<textarea ${at} rows="${o.rows || 4}">${esc(v)}</textarea>`;
+  if (o.opts) return `<select ${at}>${o.opts.map(x => { const [ov, ol] = Array.isArray(x) ? x : [x, x]; return `<option value="${esc(ov)}" ${ov == v ? 'selected' : ''}>${esc(ol)}</option>`; }).join('')}</select>`;
+  if (o.check) return `<input type="checkbox" ${at} ${v ? 'checked' : ''}>`;
+  return `<input ${o.n ? 'type="number" class="n"' : ''} ${at} value="${esc(v)}" ${o.ph ? `placeholder="${esc(o.ph)}"` : ''}>`;
+}
+
+function sheets() {
+  const chars = Object.values(S.characters);
+  const cur = S.characters[ui.charId] || chars.find(c => c.owner === S.me.id) || chars[0];
+  const owner = id => S.users.find(u => u.id === id)?.name ?? '?';
+  return `<div class="sheetwrap"><div class="panel charlist"><h2>Personaggi</h2>
+    ${chars.map(c => `<button data-do="pick" data-arg="${c.id}" class="${c === cur ? 'on' : ''}">${esc(c.name || 'Senza nome')} <small>· ${esc(owner(c.owner))}</small></button>`).join('')}
+    <button data-do="newChar">+ Nuovo personaggio</button></div>
+    <div>${cur ? sheet(cur) : '<div class="panel muted">Crea un personaggio per iniziare.</div>'}</div></div>`;
+}
+
+function sheet(c) {
+  const k = calc(c), edit = canEdit(c);
+  const R = (n, label, expr) => `<button type="button" class="roll" data-roll="${esc(expr || '1d20' + sgn(n))}" data-label="${esc((c.name || '') + ': ' + label)}" title="Tira">${expr ? '🎲' : sgn(n)}</button>`;
+  const F = (label, p, o = {}) => `<div><label>${label}</label>${I(c, p, { aria: label, ...o })}</div>`;
+  const iter = t => k.babs.length > 1 ? k.babs.map(b => sgn(t - k.bab + b)).join('/') : Array.from({ length: Math.max(1, Math.min(4, Math.ceil(k.bab / 5))) }, (_, i) => sgn(t - 5 * i)).join('/');
+  const del = (list, i) => `<button type="button" data-do="delRow" data-c="${c.id}" data-list="${list}" data-i="${i}" aria-label="Rimuovi">✕</button>`;
+  const owner = M() ? `<div><label>Giocatore</label><select data-owner="1" data-c="${c.id}" aria-label="Giocatore">${S.users.map(u => `<option value="${u.id}" ${u.id === c.owner ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></div>` : '';
+  const spellAb = c.spells?.ab || 'int';
+
+  return `<fieldset ${edit ? '' : 'disabled'}>
+  <div class="panel"><div class="row" style="justify-content:space-between"><h2>${esc(c.name || 'Senza nome')}</h2>
+    ${edit ? `<button type="button" data-do="delChar" data-arg="${c.id}">Elimina personaggio</button>` : '<span class="muted">sola lettura</span>'}</div>
+    <div class="grid">${F('Nome', ['name'])}${owner}${F('Classe', ['cls'])}${F('Livello', ['level'], { n: 1 })}${F('Razza', ['race'])}${F('Allineamento', ['align'])}${F('Divinità', ['deity'])}
+    ${F('Taglia', ['size'], { opts: Object.keys(SIZES), def: 'Media' })}${F('Età', ['age'])}${F('Sesso', ['gender'])}${F('Altezza', ['height'])}${F('Peso', ['weight'])}
+    ${F('Punti esperienza', ['xp'])}${F('Velocità', ['speed'])}</div></div>
+
+  <div class="cols wide">
+  <div class="panel"><h2>Caratteristiche</h2><div class="scroll"><table><tr><th></th><th>Punteggio</th><th>Temp.</th><th>Mod.</th></tr>
+    ${ABOPTS.map(([a, l]) => `<tr><th>${l}</th><td>${I(c, ['abil', a, 'score'], { n: 1, aria: l })}</td><td>${I(c, ['abil', a, 'temp'], { n: 1, aria: l + ' temporaneo' })}</td><td>${R(k.ab(a), 'prova di ' + l)}</td></tr>`).join('')}</table></div></div>
+
+  <div class="panel"><h2>Punti ferita</h2><div class="grid">${F('Massimi', ['hp', 'max'], { n: 1 })}${F('Attuali', ['hp', 'cur'], { n: 1 })}${F('Non letali', ['hp', 'nl'], { n: 1 })}</div>
+    <h2 style="margin-top:12px">Tiri salvezza</h2><div class="scroll"><table><tr><th></th><th>Tot.</th><th>Base</th><th>Car.</th><th>Magia</th><th>Vari</th></tr>
+    ${[['fort', 'Tempra', 'con'], ['ref', 'Riflessi', 'dex'], ['will', 'Volontà', 'wis']].map(([s, l, a]) => `<tr><th>${l}</th><td>${R(k[s], l)}</td>
+      <td>${I(c, ['saves', s, 'base'], { n: 1, aria: l + ' base' })}</td><td class="muted">${sgn(k.ab(a))}</td><td>${I(c, ['saves', s, 'magic'], { n: 1, aria: l + ' magia' })}</td><td>${I(c, ['saves', s, 'misc'], { n: 1, aria: l + ' vari' })}</td></tr>`).join('')}</table></div></div>
+
+  <div class="panel"><h2>Classe Armatura</h2><div class="row" style="margin-bottom:8px"><span class="big">CA ${k.ac}</span><span>Contatto <b>${k.touch}</b></span><span>Colto alla sprovvista <b>${k.ff}</b></span></div>
+    <div class="grid">${F('Armatura', ['ac', 'armor'], { n: 1 })}${F('Scudo', ['ac', 'shield'], { n: 1 })}${F('Naturale', ['ac', 'natural'], { n: 1 })}${F('Deviazione', ['ac', 'deflection'], { n: 1 })}
+    ${F('Vari', ['ac', 'misc'], { n: 1 })}${F('Des. massima', ['ac', 'maxDex'], { n: 1 })}${F('Penalità armatura', ['ac', 'acp'], { n: 1, ph: '-2' })}${F('Fallim. incant. %', ['ac', 'asf'], { n: 1 })}</div></div>
+
+  <div class="panel"><h2>Combattimento</h2><div class="scroll"><table>
+    <tr><th>Iniziativa</th><td>${R(k.init, 'iniziativa')}</td><td><label>vari</label>${I(c, ['initMisc'], { n: 1, aria: 'iniziativa vari' })}</td></tr>
+    <tr><th>Bonus attacco base</th><td>${I(c, ['bab'], { ph: '+7/+5/+3', aria: 'BAB' })}</td><td class="muted">${iter(k.bab)}</td></tr>
+    <tr><th>Mischia</th><td>${R(k.melee, 'attacco in mischia')}</td><td class="muted">${iter(k.melee)}</td></tr>
+    <tr><th>Distanza</th><td>${R(k.ranged, 'attacco a distanza')}</td><td class="muted">${iter(k.ranged)}</td></tr>
+    <tr><th>Lotta</th><td>${R(k.grapple, 'lotta')}</td><td><label>vari</label>${I(c, ['grappleMisc'], { n: 1, aria: 'lotta vari' })}</td></tr></table></div>
+    <div class="grid" style="margin-top:8px">${F('Riduzione del danno', ['dr'])}${F('Resistenza agli incantesimi', ['sr'])}</div></div>
+  </div>
+
+  <div class="panel"><h2>Attacchi</h2><div class="scroll"><table><tr><th>Arma</th><th>Bonus</th><th></th><th>Danni</th><th></th><th>Critico</th><th>Gittata</th><th>Note</th><th></th></tr>
+    ${(c.attacks || []).map((x, i) => `<tr><td>${I(c, ['attacks', i, 'name'], { aria: 'arma' })}</td><td>${I(c, ['attacks', i, 'bonus'], { ph: '+5/+0', aria: 'bonus' })}</td>
+      <td>${R(parseInt(x.bonus) || 0, x.name || 'attacco')}</td><td>${I(c, ['attacks', i, 'dmg'], { ph: '1d8+3', aria: 'danni' })}</td>
+      <td>${/^[\dd+\-\s]+$/i.test(x.dmg || '') && /d/i.test(x.dmg) ? R(0, 'danni ' + (x.name || ''), x.dmg) : ''}</td>
+      <td>${I(c, ['attacks', i, 'crit'], { ph: '19-20/x2', aria: 'critico' })}</td><td>${I(c, ['attacks', i, 'range'], { aria: 'gittata' })}</td><td>${I(c, ['attacks', i, 'notes'], { aria: 'note' })}</td><td>${del('attacks', i)}</td></tr>`).join('')}
+    </table></div><button type="button" data-do="addRow" data-c="${c.id}" data-list="attacks">+ Attacco</button></div>
+
+  <div class="panel"><h2>Abilità</h2>
+    <div class="row" style="margin-bottom:8px;align-items:end">
+      <div><label>Punti per livello (classe)</label>${I(c, ['skillPts'], { n: 1, aria: 'punti abilità per livello' })}</div>
+      <div><label>Correzione</label>${I(c, ['skillMisc'], { n: 1, ph: '0', aria: 'correzione punti abilità' })}</div>
+      <span>Spesi <b>${k.skillUsed}</b> su <b>${k.skillTot}</b></span>
+      <span class="big" style="${k.skillTot - k.skillUsed < 0 ? 'color:#e5484d' : ''}">Da assegnare ${k.skillTot - k.skillUsed}</span>
+    </div>
+    <p class="muted" style="margin:0 0 6px">Cl. = abilità di classe (1 punto per grado, le altre 2) · Pen. = applica la penalità di armatura (${k.acp}) · Correzione: multiclasse, aumenti di INT, talenti</p>
+    <div class="scroll"><table><tr><th>Cl.</th><th>Abilità</th><th>Car.</th><th>Tot.</th><th>Gradi</th><th>Vari</th><th>Pen.</th><th></th></tr>
+    ${(c.skills || []).map((s, i) => `<tr><td>${I(c, ['skills', i, 'cls'], { check: 1, aria: 'di classe' })}</td><td>${I(c, ['skills', i, 'name'], { aria: 'abilità' })}</td>
+      <td>${I(c, ['skills', i, 'ab'], { opts: ABOPTS, aria: 'caratteristica' })}</td><td>${R(num(s.ranks) + k.ab(s.ab) + num(s.misc) + (s.acp ? k.acp : 0), s.name)}</td>
+      <td>${I(c, ['skills', i, 'ranks'], { n: 1, aria: 'gradi' })}</td><td>${I(c, ['skills', i, 'misc'], { n: 1, aria: 'vari' })}</td><td>${I(c, ['skills', i, 'acp'], { check: 1, aria: 'penalità armatura' })}</td><td>${del('skills', i)}</td></tr>`).join('')}
+    </table></div><button type="button" data-do="addRow" data-c="${c.id}" data-list="skills">+ Abilità</button></div>
+
+  <div class="cols">
+    <div class="panel"><h2>Talenti</h2>${I(c, ['feats'], { area: 1, rows: 6 })}</div>
+    <div class="panel"><h2>Capacità speciali</h2>${I(c, ['special'], { area: 1, rows: 6 })}</div>
+    <div class="panel"><h2>Linguaggi</h2>${I(c, ['langs'], { area: 1, rows: 6 })}</div>
+  </div>
+
+  <div class="cols wide">
+    <div class="panel"><h2>Equipaggiamento</h2>${I(c, ['gear'], { area: 1, rows: 10 })}
+      <div class="grid" style="margin-top:8px">${[['pp', 'Platino (mp)'], ['gp', 'Oro (mo)'], ['sp', 'Argento (ma)'], ['cp', 'Rame (mr)']].map(([m, l]) => F(l, ['money', m], { n: 1 })).join('')}</div></div>
+    <div class="panel"><h2>Incantesimi</h2><div class="grid">${F('Caratteristica', ['spells', 'ab'], { opts: ABOPTS, def: 'int' })}${F('Livello incantatore', ['spells', 'cl'], { n: 1 })}</div>
+      <div class="scroll"><table style="margin:8px 0"><tr><th>Liv.</th><th>Al giorno</th><th>Bonus</th><th>Usati</th><th>CD</th></tr>
+      ${Array.from({ length: 10 }, (_, l) => `<tr><th>${l}</th><td>${I(c, ['spells', 'lv', l, 'day'], { n: 1, aria: `livello ${l} al giorno` })}</td><td>${I(c, ['spells', 'lv', l, 'bonus'], { n: 1, aria: `livello ${l} bonus` })}</td>
+        <td>${I(c, ['spells', 'lv', l, 'used'], { n: 1, aria: `livello ${l} usati` })}</td><td>${10 + l + k.ab(spellAb)}</td></tr>`).join('')}</table></div>
+      <label>Incantesimi conosciuti / preparati</label>${I(c, ['spells', 'list'], { area: 1, rows: 8, aria: 'elenco incantesimi' })}</div>
+  </div>
+
+  <div class="panel"><h2>Note</h2>${I(c, ['notes'], { area: 1, rows: 6 })}</div>
+  <div class="panel"><h2>Storia personale</h2>${I(c, ['backstory'], { area: 1, rows: 12, aria: 'Storia personale' })}</div>
+  </fieldset>`;
+}
+
+function combat() {
+  const t = S.tracker, master = M();
+  const T = (i, f, n) => `<input ${n ? 'type="number" class="n"' : ''} data-t="${i}" data-f="${f}" value="${esc(t.list[i][f])}" aria-label="${f}">`;
+  const curName = (() => { const x = t.list.find((x, i) => master ? i === t.turn : x.current); return x && (S.characters[x.charId]?.name || x.name); })();
+  const rows = t.list.map((x, i) => {
+    const c = x.charId && S.characters[x.charId], k = c && calc(c);
+    const cur = master ? i === t.turn : x.current;
+    const hp = c ? (canEdit(c) ? `<span class="row" style="gap:4px;flex-wrap:nowrap">${I(c, ['hp', 'cur'], { n: 1, aria: 'PF attuali' })} / ${esc(c.hp?.max)}</span>` : `${esc(c.hp?.cur)} / ${esc(c.hp?.max)}`)
+      : master ? `<span class="row" style="gap:4px;flex-wrap:nowrap">${T(i, 'hp', 1)} / ${T(i, 'maxHp', 1)}</span>` : '—';
+    return `<tr class="${cur ? 'cur' : ''}"><td>${cur ? '▶' : ''}</td>
+      <td>${c ? esc(c.name) : master ? T(i, 'name') : esc(x.name)}</td>
+      <td>${master ? T(i, 'init', 1) : esc(x.init)}</td>
+      ${master ? `<td>${c ? sgn(k.init) : T(i, 'initMod', 1)}</td>` : ''}
+      <td>${hp}</td>
+      <td>${c ? k.ac : master ? T(i, 'ac', 1) : ''}</td>
+      <td>${master ? T(i, 'cond') : esc(x.cond)}</td>
+      ${master ? `<td><input type="checkbox" data-t="${i}" data-f="hidden" ${x.hidden ? 'checked' : ''} aria-label="nascosto"></td>
+        <td style="white-space:nowrap"><button data-do="tMove" data-arg="${i}" data-d="-1" aria-label="Su">↑</button><button data-do="tMove" data-arg="${i}" data-d="1" aria-label="Giù">↓</button><button data-do="tDel" data-arg="${i}" aria-label="Rimuovi">✕</button></td>` : ''}</tr>`;
+  }).join('');
+  return `<div class="panel"><div class="row" style="margin-bottom:8px"><span class="big">Round ${t.round}</span>${curName ? `<span>Turno di <b>${esc(curName)}</b></span>` : ''}</div>
+    ${master ? `<div class="row" style="gap:6px;margin-bottom:8px"><button data-do="tNext" class="on">Turno successivo ▶</button><button data-do="tAddPcs">+ Tutti i PG</button><button data-do="tAddNpc">+ PNG/mostro</button>
+      <button data-do="tRollInit">Tira iniziative mancanti</button><button data-do="tSort">Ordina per iniziativa</button><button data-do="tReset">Fine combattimento</button></div>` : ''}
+    <div class="scroll"><table><tr><th></th><th>Nome</th><th>Iniz.</th>${master ? '<th>Mod. iniz.</th>' : ''}<th>PF</th><th>CA</th><th>Condizioni</th>${master ? '<th>Nascosto</th><th></th>' : ''}</tr>${rows}</table></div>
+    ${t.list.length ? '' : '<p class="muted">Nessun combattimento in corso.</p>'}
+    ${master ? '<p class="muted">I PNG nascosti non compaiono ai giocatori; PF e CA dei PNG sono visibili solo a te.</p>' : ''}</div>`;
+}
+
+function handouts() {
+  if (!M()) return S.handouts.length
+    ? S.handouts.map(h => `<div class="panel"><h2>${esc(h.title || 'Senza titolo')}</h2><div class="pre">${esc(h.text)}</div></div>`).join('')
+    : '<div class="panel muted">Il master non ha ancora condiviso nulla.</div>';
+  return `<div class="panel"><h2>Note private del master</h2><textarea id="mnotes" rows="8" aria-label="Note private">${esc(S.notes)}</textarea></div>
+    ${S.handouts.map((h, i) => `<div class="panel"><div class="row"><input data-h="${i}" data-f="title" value="${esc(h.title)}" placeholder="Titolo" aria-label="Titolo" style="flex:1;width:auto">
+      <label class="row" style="gap:4px"><input type="checkbox" data-h="${i}" data-f="visible" ${h.visible ? 'checked' : ''}> visibile ai giocatori</label>
+      <button data-do="hDel" data-arg="${i}">Elimina</button></div>
+      <textarea data-h="${i}" data-f="text" rows="6" style="margin-top:8px" aria-label="Testo">${esc(h.text)}</textarea></div>`).join('')}
+    <button data-do="hNew">+ Nuovo handout</button>`;
+}
+
+function story() {
+  const body = M()
+    ? `<textarea id="story" rows="20" aria-label="Storia della campagna">${esc(S.story)}</textarea><p class="muted">I giocatori la leggono ma non possono modificarla.</p>`
+    : S.story ? `<div class="pre">${esc(S.story)}</div>` : '<p class="muted">Il master non ha ancora scritto la storia.</p>';
+  return `<div class="panel"><h2>Storia della campagna</h2>${body}</div>`;
+}
+
+// Chiave stabile di un campo, per non perdere quello che stai scrivendo quando arriva un aggiornamento.
+const keyOf = el => el.dataset?.p ? el.dataset.c + el.dataset.p : el.dataset?.t ? 't' + el.dataset.t + el.dataset.f : el.dataset?.h ? 'h' + el.dataset.h + el.dataset.f : ['mnotes', 'story'].includes(el.id) ? el.id : null;
+
+// Non ridisegnare mentre il mouse è premuto, altrimenti il click sul bottone sostituito va perso.
+let pressed = false, pending = false;
+addEventListener('pointerdown', () => { pressed = true; }, true);
+addEventListener('pointerup', () => { pressed = false; if (pending) { pending = false; setTimeout(render); } }, true);
+
+// Su schermi stretti i dadi stanno in un pannello a scomparsa: l'ultimo tiro compare in una notifica.
+const narrow = matchMedia('(max-width: 1100px)');
+let lastRoll, lastCamp, toastTimer;
+function rollHtml(r) {
+  const nat = /^1d20\[(20|1)\]/.exec(r.detail);
+  return `<span class="tot">${r.total}</span><b>${esc(r.who)}</b> ${esc(r.label)}${r.secret ? ' 🔒' : ''}
+    <br><small class="muted">${esc(r.expr)} → ${esc(r.detail)}</small>${nat ? ` <span class="crit">${nat[1] === '20' ? '20 naturale!' : '1 naturale'}</span>` : ''}`;
+}
+function toast(r) {
+  if (!narrow.matches || document.body.classList.contains('dice-open')) return;
+  const el = $('#toast');
+  el.innerHTML = rollHtml(r);
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 5000);
+}
+function setDice(open) {
+  document.body.classList.toggle('dice-open', open);
+  $('#dicefab').setAttribute('aria-expanded', open);
+  if (open) $('#toast').classList.remove('show');
+}
+
+function render() {
+  if (!S) return;
+  if (pressed) { pending = true; return; }
+  $('nav').innerHTML = [['sheets', 'Schede'], ['combat', 'Combattimento'], ['handouts', M() ? 'Handout e note' : 'Handout'], ['story', 'Storia']]
+    .map(([t, l]) => `<button data-do="tab" data-arg="${t}" class="${ui.tab === t ? 'on' : ''}">${l}</button>`).join('');
+  const campName = S.campaigns.find(c => c.id === S.active)?.name;
+  const camp = `<select id="campsel" aria-label="Campagna" style="width:auto">${S.campaigns.map(c => `<option value="${c.id}" ${c.id === S.active ? 'selected' : ''}>${esc(c.name)}${c.id === S.live ? ' ▶ in gioco' : ''}</option>`).join('')}</select>
+    ${M() ? '<button data-do="campRename">Rinomina</button><button data-do="campNew">+ Campagna</button>'
+      : S.active !== S.live ? '<span class="muted">stai sfogliando, non è la campagna in gioco</span>' : ''}`;
+  // riscrive solo se cambia, così il menu a tendina non si chiude a ogni aggiornamento
+  if ($('#camp').dataset.html !== camp) { $('#camp').innerHTML = camp; $('#camp').dataset.html = camp; }
+  document.title = `${campName} · Tavolo D&D 3.5`;
+  $('#who').textContent = `${S.me.name} (${M() ? 'master' : 'giocatore'})`;
+  $('#secretwrap').hidden = !M();
+  const last = S.rolls.at(-1);
+  // notifica solo per tiri nuovi nella stessa campagna, non quando si cambia campagna
+  if (S.active === lastCamp && last && last.id !== lastRoll) toast(last);
+  lastCamp = S.active; lastRoll = last?.id;
+  $('#log').innerHTML = S.rolls.slice().reverse().map(r => `<div>${rollHtml(r)}</div>`).join('') || '<p class="muted">Nessun tiro.</p>';
+
+  const a = document.activeElement, key = a && keyOf(a);
+  const keep = key && { v: a.value, s: a.selectionStart, e: a.selectionEnd };
+  $('#main').innerHTML = ({ sheets, combat, handouts, story }[ui.tab] || sheets)();
+  if (keep) {
+    const el = [...$('#main').querySelectorAll('input,textarea,select')].find(x => keyOf(x) === key);
+    if (el) {
+      if (el.type !== 'checkbox') el.value = keep.v;
+      el.focus();
+      try { el.setSelectionRange(keep.s, keep.e); } catch {}
+    }
+  }
+}
+
+// --- Combattimento (solo master) ---
+function setTracker(f) {
+  const t = structuredClone(S.tracker);
+  f(t);
+  t.turn = Math.min(t.turn, Math.max(0, t.list.length - 1));
+  S.tracker = t;
+  render();
+  act('tracker', { tracker: t });
+}
+const d20 = () => 1 + Math.floor(Math.random() * 20);
+const byInit = t => { t.list.sort((a, b) => num(b.init) - num(a.init)); t.turn = 0; };
+
+const handlers = {
+  tab: a => { ui.tab = a; saveUi(); render(); },
+  diceToggle: () => setDice(!document.body.classList.contains('dice-open')),
+  pick: a => { ui.charId = a; saveUi(); render(); },
+  async newChar() {
+    const r = await act('char.create', { data: { name: 'Nuovo personaggio', skills: SKILLS.map(([name, ab, acp]) => ({ name, ab, acp: !!acp })) } });
+    if (r.id) { ui.charId = r.id; saveUi(); render(); }
+  },
+  delChar: a => confirm(`Eliminare definitivamente "${S.characters[a]?.name}"?`) && act('char.delete', { id: a }),
+  addRow: (_, d) => {
+    const c = S.characters[d.c];
+    act('char.set', { id: c.id, path: [d.list], value: [...(c[d.list] || []), d.list === 'skills' ? { name: '', ab: 'int' } : {}] });
+  },
+  delRow: (_, d) => {
+    const c = S.characters[d.c];
+    act('char.set', { id: c.id, path: [d.list], value: c[d.list].filter((_, i) => i !== +d.i) });
+  },
+  tNext: () => setTracker(t => { if (++t.turn >= t.list.length) { t.turn = 0; t.round++; } }),
+  tAddNpc: () => setTracker(t => t.list.push({ id: rid(), name: 'PNG', init: '', initMod: '', hp: '', maxHp: '', ac: '', cond: '', hidden: false })),
+  tAddPcs: () => setTracker(t => Object.values(S.characters).filter(c => !t.list.some(x => x.charId === c.id)).forEach(c => t.list.push({ id: rid(), charId: c.id, init: '', cond: '' }))),
+  tRollInit: () => setTracker(t => {
+    t.list.forEach(x => { if (x.init === '' || x.init === undefined) { const c = S.characters[x.charId]; x.init = d20() + (c ? calc(c).init : num(x.initMod)); } });
+    byInit(t);
+  }),
+  tSort: () => setTracker(byInit),
+  tMove: (a, d) => setTracker(t => {
+    const i = +a, j = i + +d.d;
+    if (j < 0 || j >= t.list.length) return;
+    [t.list[i], t.list[j]] = [t.list[j], t.list[i]];
+    if (t.turn === i) t.turn = j; else if (t.turn === j) t.turn = i; // il turno segue chi stava agendo
+  }),
+  tDel: a => setTracker(t => { if (+a < t.turn) t.turn--; t.list.splice(+a, 1); }),
+  tReset: () => confirm('Terminare il combattimento e svuotare il tracker?') && setTracker(t => { t.list = []; t.round = 1; t.turn = 0; }),
+  campNew: () => { const name = prompt('Nome della nuova campagna'); if (name) act('campaign.create', { name }); },
+  campRename: () => {
+    const name = prompt('Nuovo nome della campagna', S.campaigns.find(c => c.id === S.active)?.name);
+    if (name) act('campaign.rename', { name });
+  },
+  hNew: () => act('handouts', { handouts: [...S.handouts, { id: rid(), title: '', text: '', visible: false }] }),
+  hDel: a => confirm('Eliminare questo handout?') && act('handouts', { handouts: S.handouts.filter((_, i) => i !== +a) }),
+  async logout() { await fetch('/api/logout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }); location.reload(); },
+};
+
+addEventListener('keydown', e => { if (e.key === 'Escape') setDice(false); });
+narrow.addEventListener('change', () => setDice(false));
+
+document.addEventListener('click', e => {
+  if (e.target.closest('#scrim')) return setDice(false);
+  if (e.target.closest('#toast')) return setDice(true);
+  const b = e.target.closest('button');
+  if (!b) return;
+  const d = b.dataset;
+  if (d.roll) act('roll', { expr: d.roll, label: d.label });
+  else if (d.qd) act('roll', { expr: d.qd, label: $('#rlabel').value, secret: $('#secret').checked });
+  else if (d.do) handlers[d.do](d.arg, d);
+});
+
+document.addEventListener('change', e => {
+  const el = e.target, d = el.dataset, val = el.type === 'checkbox' ? el.checked : el.value;
+  if (d.p) {
+    const path = JSON.parse(d.p);
+    // aggiorna subito in locale, così i totali si ricalcolano senza aspettare il server
+    let o = S.characters[d.c];
+    for (const k of path.slice(0, -1)) o = o[k] = o[k] && typeof o[k] === 'object' ? o[k] : {};
+    o[path.at(-1)] = val;
+    render();
+    act('char.set', { id: d.c, path, value: val });
+  } else if (d.owner) act('char.owner', { id: d.c, owner: el.value });
+  else if (d.t) setTracker(t => { t.list[+d.t][d.f] = val; });
+  else if (d.h) act('handouts', { handouts: S.handouts.map((h, i) => (i === +d.h ? { ...h, [d.f]: val } : h)) });
+  else if (el.id === 'mnotes') act('notes', { notes: val });
+  else if (el.id === 'story') act('story', { story: val });
+  else if (el.id === 'campsel') act('campaign.select', { id: val });
+});
+
+$('#rollform').addEventListener('submit', async e => {
+  e.preventDefault();
+  const expr = $('#expr').value.trim();
+  if (!expr) return;
+  const r = await act('roll', { expr, label: $('#rlabel').value, secret: $('#secret').checked });
+  if (r.ok) $('#rlabel').value = '';
+});
+
+$('#loginform').addEventListener('submit', async e => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const r = await fetch('/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: f.get('name'), pin: f.get('pin') }) });
+  if (r.ok) boot();
+  else $('#lerr').textContent = (await r.json().catch(() => ({}))).error || 'Errore';
+});
+
+async function boot() {
+  const r = await fetch('/api/me').catch(() => null);
+  if (!r || r.status === 401) { $('#login').hidden = false; $('#app').hidden = true; return; }
+  $('#login').hidden = true;
+  $('#app').hidden = false;
+  const es = new EventSource('/api/events');
+  es.onmessage = e => { S = JSON.parse(e.data); render(); };
+  es.onerror = () => { if (es.readyState === EventSource.CLOSED) setTimeout(boot, 2000); };
+}
+boot();
+</script>
+</body>
+</html>

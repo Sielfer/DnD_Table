@@ -1,0 +1,9 @@
+{
+  "name": "tavolo-dnd35",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "test": "node server.js --test",
+    "build": "node build.js"
+  }
+}
