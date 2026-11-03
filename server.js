@@ -158,6 +158,7 @@ function view(u) {
     handouts: isMaster ? camp.handouts : camp.handouts.filter(h => h.visible),
     notes: isMaster ? camp.notes : undefined,
     story: camp.story ?? '',
+    maps: isMaster ? camp.maps ?? [] : (camp.maps ?? []).filter(m => m.visible),
   };
 }
 
@@ -231,6 +232,11 @@ const actions = {
   },
   notes(u, a) { needMaster(u); C().notes = String(a.notes ?? ''); },
   story(u, a) { needMaster(u); C().story = String(a.story ?? ''); },
+  maps(u, a) {
+    needMaster(u);
+    if (!Array.isArray(a.maps)) fail('Mappe non valide');
+    C().maps = a.maps;
+  },
 };
 
 if (TEST) {
@@ -261,6 +267,11 @@ if (TEST) {
   assert.throws(() => actions.story(p, { story: 'x' }));
   actions.story(master, { story: 'Inizio' });
   assert.strictEqual(view(p).story, 'Inizio');
+  // mappe: i giocatori vedono solo quelle mostrate dal master
+  assert.throws(() => actions.maps(p, { maps: [] }));
+  actions.maps(master, { maps: [{ id: 'a', visible: true }, { id: 'b', visible: false }] });
+  assert.deepStrictEqual(view(p).maps.map(m => m.id), ['a']);
+  assert.strictEqual(view(master).maps.length, 2);
   assert.strictEqual(v.handouts.length, 0);
 
   // percorsi pericolosi in char.set
