@@ -926,14 +926,18 @@ const tokColor = cid => TOK_COLORS[Math.abs([...String(cid)].reduce((h, ch) => (
 const initials = c => esc((c.name || '?').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase());
 const tokIcon = c => icon(`<circle cx="5" cy="5" r="4.3" fill="${tokColor(c.id)}" stroke="#111" stroke-width=".6"/>
   <text x="5" y="5" font-size="3.8" font-weight="800" text-anchor="middle" dominant-baseline="central" fill="#fff" font-family="system-ui, sans-serif">${initials(c)}</text>`);
+// Spazio occupato per taglia, in quadretti da 1,5 m (D&D 3.5: Grande 3 m, Enorme 4,5 m, Mastodontica 6 m, Colossale 9 m).
+// Sotto la Piccola si sta in una parte di quadretto: il segnalino resta al centro del suo quadretto, più piccolo.
+const SPACE = { Piccolissima: .1, Minuta: .2, Minuscola: .5, Piccola: 1, Media: 1, Grande: 2, Enorme: 3, Mastodontica: 4, Colossale: 6 };
+const space = c => SPACE[c?.size] ?? 1;
 // Segnalini dei personaggi sul piano mostrato; quelli che puoi muovere si trascinano.
 function tokensSvg(m, mode) {
   return Object.entries(m.tokens || {}).filter(([cid, t]) => t.lv === m.lvId && S.characters[cid]).map(([cid, t]) => {
-    const c = S.characters[cid], mine = mode === 'tok' && (M() || c.owner === S.me.id);
-    return `<g ${mine ? `data-tok="${cid}"` : ''}><g transform="translate(${t.x + .5} ${t.y + .5})"><title>${esc(c.name || 'Senza nome')}</title>
-      <circle r=".46" fill="${tokColor(cid)}" stroke="${cid === ui.tokChar && mine ? '#fff' : '#111'}" stroke-width=".1"/>
-      <text font-size=".42" font-weight="800" text-anchor="middle" dominant-baseline="central" fill="#fff" font-family="system-ui, sans-serif">${initials(c)}</text>
-      <text y=".78" font-size=".34" font-weight="700" text-anchor="middle" dominant-baseline="central" fill="#fff" stroke="#000" stroke-width=".12" paint-order="stroke" font-family="system-ui, sans-serif">${esc((c.name || '').slice(0, 14))}</text></g></g>`;
+    const c = S.characters[cid], mine = mode === 'tok' && (M() || c.owner === S.me.id), s = space(c), n = Math.max(1, s), k = Math.max(s, .3); // k: i piccolissimi restano cliccabili
+    return `<g ${mine ? `data-tok="${cid}"` : ''}><g transform="translate(${t.x + n / 2} ${t.y + n / 2})"><title>${esc(c.name || 'Senza nome')} (${esc(c.size || 'Media')})</title>
+      <circle r="${.46 * k}" fill="${tokColor(cid)}" stroke="${cid === ui.tokChar && mine ? '#fff' : '#111'}" stroke-width="${.1 * Math.sqrt(k)}"/>
+      <text font-size="${.42 * Math.max(k, .5)}" font-weight="800" text-anchor="middle" dominant-baseline="central" fill="#fff" font-family="system-ui, sans-serif">${initials(c)}</text>
+      <text y="${.46 * k + .32}" font-size=".34" font-weight="700" text-anchor="middle" dominant-baseline="central" fill="#fff" stroke="#000" stroke-width=".12" paint-order="stroke" font-family="system-ui, sans-serif">${esc((c.name || '').slice(0, 14))}</text></g></g>`;
   }).join('');
 }
 const objIcon = o => {
@@ -1054,7 +1058,12 @@ function setMaps(f) {
 function moveToken(mid, cid, pos) {
   const m = S.maps.find(x => x.id === mid);
   m.tokens = { ...m.tokens };
-  if (pos) m.tokens[cid] = pos; else delete m.tokens[cid];
+  if (pos) {
+    // tutto il segnalino deve stare dentro la mappa
+    const n = Math.max(1, space(S.characters[cid]));
+    pos = { ...pos, x: Math.min(m.cols * TILE - n, Math.max(0, pos.x)), y: Math.min(m.rows * TILE - n, Math.max(0, pos.y)) };
+    m.tokens[cid] = pos;
+  } else delete m.tokens[cid];
   render();
   act('token', pos ? { map: mid, char: cid, ...pos } : { map: mid, char: cid, remove: true });
 }
@@ -1065,8 +1074,8 @@ function mapClick(e) {
   if (!M() || ui.mapMode === 'tok') {
     const c = S.characters[ui.tokChar];
     if (!c || !(M() || c.owner === S.me.id)) return;
-    const [sx, sy] = toMap(svg, e), W = m.cols * TILE, H = m.rows * TILE;
-    return moveToken(m.id, c.id, { lv: curLevel(m).id, x: Math.min(W - 1, Math.max(0, Math.floor(sx))), y: Math.min(H - 1, Math.max(0, Math.floor(sy))) });
+    const [sx, sy] = toMap(svg, e), off = Math.floor((Math.max(1, space(c)) - 1) / 2); // il quadretto cliccato sta al centro
+    return moveToken(m.id, c.id, { lv: curLevel(m).id, x: Math.floor(sx) - off, y: Math.floor(sy) - off });
   }
   const r = svg.getBoundingClientRect(), W = m.cols * TILE, H = m.rows * TILE;
   // il viewBox ha mezzo quadretto di margine per lato
