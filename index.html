@@ -692,7 +692,8 @@ function doorSnap({ view, F, n }, sx, sy) {
   return best;
 }
 
-function mapSvg(m, mode) {
+// Pavimenti, muri, porte e oggetti di un piano (senza la roccia di sfondo): serve anche per il piano visto in trasparenza.
+function layerSvg(m, mode, grid) {
   const W = m.cols * TILE, H = m.rows * TILE;
   const { floor, F } = floorOf(m);
   let rects = '', walls = '', glyphs = '';
@@ -728,7 +729,16 @@ function mapSvg(m, mode) {
     const floorA = on.some(p => (right ? F(line - 1, base + p) : F(base + p, line - 1)));
     glyphs += grab(`data-ek="${k}" data-n="${L}" data-s="${s}"`, glyphG(s, right, line, t0, L, floorA));
   }
+  return `${rects}${grid ? `<rect width="${W}" height="${H}" fill="url(#mapgrid)"/>` : ''}
+    <path d="${walls}" stroke="#000" stroke-opacity=".35" stroke-width=".7" stroke-linecap="round" fill="none"/>
+    <path d="${walls}" stroke="#2b2724" stroke-width=".3" stroke-linecap="square" fill="none"/>
+    ${glyphs}${(m.arrivals || []).map(o => objSvg(o, true)).join("")}${[...(m.objects || [])].sort((a, b) => FLAT.has(b.type) - FLAT.has(a.type)).map(o => objSvg(o, false, mode === 'obj')).join("")}`;
+}
 
+function mapSvg(m, mode) {
+  const W = m.cols * TILE, H = m.rows * TILE;
+  // il piano sopra o sotto, trasparente e non cliccabile, sopra quello mostrato
+  const ghost = m.ghost ? `<g data-ghost opacity="${m.ghost.op}" pointer-events="none">${layerSvg(m.ghost.view)}</g>` : '';
   let overlay = '';
   if (mode && mode !== 'tok') {
     let lines = '';
@@ -747,16 +757,13 @@ function mapSvg(m, mode) {
   return `<svg ${mode ? 'id="mapsvg"' : ''} data-id="${m.id}" viewBox="-.5 -.5 ${W + 1} ${H + 1}" role="img" aria-label="Mappa ${esc(m.name)}"
     style="display:block;width:${ui.mapZoom ? `${(W + 1) * ui.mapZoom}px` : '100%'};max-width:none;border-radius:10px;cursor:${mode ? 'crosshair' : 'default'}">
     <rect x="-.5" y="-.5" width="${W + 1}" height="${H + 1}" fill="url(#tex-roccia)"/>
-    ${rects}<rect width="${W}" height="${H}" fill="url(#mapgrid)"/>
-    <path d="${walls}" stroke="#000" stroke-opacity=".35" stroke-width=".7" stroke-linecap="round" fill="none"/>
-    <path d="${walls}" stroke="#2b2724" stroke-width=".3" stroke-linecap="square" fill="none"/>
-    ${glyphs}${(m.arrivals || []).map(o => objSvg(o, true)).join("")}${[...(m.objects || [])].sort((a, b) => FLAT.has(b.type) - FLAT.has(a.type)).map(o => objSvg(o, false, mode === 'obj')).join("")}${tokensSvg(m, mode)}${overlay}</svg>`;
+    ${layerSvg(m, mode, true)}${ghost}${tokensSvg(m, mode)}${overlay}</svg>`;
 }
 
 // --- Oggetti sui quadretti: scale, pozzi, buchi ---
 // [larghezza, lunghezza, nome, gruppo] in quadretti a rotazione 0; la scala "sale" verso l'alto del disegno.
 const OBJ = {
-  stairs: [2, 3, 'Scala', 'pass'], ladder: [1, 2, 'Scala a pioli', 'pass'], well: [2, 2, 'Pozzo', 'pass'], hole: [2, 2, 'Buco nel soffitto', 'pass'], pit: [2, 2, 'Buco nel pavimento', 'pass'],
+  stairs: [2, 3, 'Scala', 'pass'], spiral: [2, 2, 'Scala a chiocciola', 'pass'], ladder: [1, 2, 'Scala a pioli', 'pass'], well: [2, 2, 'Pozzo', 'pass'], hole: [2, 2, 'Buco nel soffitto', 'pass'], pit: [2, 2, 'Buco nel pavimento', 'pass'],
   bed: [1, 2, 'Letto', 'arredo'], chair: [1, 1, 'Sedia', 'arredo'], table: [2, 1, 'Tavolo', 'arredo'], barrel: [1, 1, 'Barile', 'arredo'], crate: [1, 1, 'Cassa', 'arredo'],
   chest: [1, 1, 'Baule', 'arredo'], mirror: [1, 1, 'Specchio', 'arredo'], rug: [2, 3, 'Tappeto', 'arredo'], shelf: [2, 1, 'Libreria', 'arredo'], wardrobe: [2, 1, 'Armadio', 'arredo'],
   brazier: [1, 1, 'Braciere', 'arredo'], statue: [1, 1, 'Statua', 'arredo'], altar: [2, 1, 'Altare', 'arredo'],
@@ -765,13 +772,15 @@ const OBJ = {
   bush: [1, 1, 'Cespuglio', 'natura'], tree: [2, 2, 'Albero', 'natura'], boulder: [1, 1, 'Masso', 'natura'],
 };
 const OBJ_GROUPS = [['pass', 'Scale, pozzi e buchi'], ['arredo', 'Arredo'], ['regale', 'Arredo regale'], ['natura', 'Natura']];
-const CLIMB = new Set(['stairs', 'ladder']);
-const ROUND = new Set(['well', 'hole', 'pit', 'barrel', 'brazier', 'bush', 'tree', 'candelabra', 'fountain']); // non si ruotano
+const CLIMB = new Set(['stairs', 'spiral', 'ladder']);
+// statue: lato in quadretti (1,5 m ciascuno)
+const STATUE_SIZES = [[1, 'Piccola'], [2, 'Grande'], [3, 'Enorme'], [4, 'Colossale']];
+const ROUND = new Set(['spiral', 'well','hole', 'pit', 'barrel', 'brazier', 'bush', 'tree', 'candelabra', 'fountain']); // non si ruotano
 const FLAT = new Set(['rug', 'carpet']); // stanno sotto a tutto il resto
 const VEG = new Set(['bush', 'tree']);
 const VEG_STATES = [['lush', 'Rigogliosa'], ['dry', 'Secca'], ['inf', 'Infestata']];
 const ruinLabel = t => (OBJ[t]?.[3] === 'pass' ? 'Rovinata (inagibile)' : t === 'boulder' ? 'Spaccato' : t === 'candelabra' ? 'Spento' : t === 'fountain' ? 'Secca e rotta' : 'Rotto');
-const footprint = o => { const [w, h] = OBJ[o.type]; return o.rot % 2 ? [h, w] : [w, h]; };
+const footprint = o => { const k = o.n || 1, [w, h] = OBJ[o.type]; return o.rot % 2 ? [h * k, w * k] : [w * k, h * k]; }; // n: statue più grandi
 
 function ladderShape(L, ruined, scale = 1) {
   const r = .3 * scale, frame = '#141210', wood = '#c9873f';
@@ -793,8 +802,8 @@ const WOOD = '#a8703a', WOOD_D = '#7a4a1c', INK = '#141210';
 const blight = s => `<g transform="scale(${s})"><path d="M-.62 -.62L.62 .62M.62 -.62L-.62 .62M-.72 0H.72M0 -.72V.72" stroke="#eef" stroke-opacity=".5" stroke-width=".025"/>
   <circle r=".3" fill="none" stroke="#eef" stroke-opacity=".5" stroke-width=".025"/><circle r=".56" fill="none" stroke="#eef" stroke-opacity=".4" stroke-width=".025"/>
   <g fill="#9b5fc0" stroke="#3a1f4a" stroke-width=".03"><circle cx="-.45" cy="-.2" r=".12"/><circle cx=".3" cy="-.45" r=".1"/><circle cx=".45" cy=".3" r=".13"/><circle cx="-.2" cy=".45" r=".09"/><circle cx=".08" cy=".05" r=".07"/></g></g>`;
-function decorShape(t, ruined, w, h, inf) {
-  const k = `stroke="${INK}" stroke-width=".07"`;
+function decorShape(t, ruined, w, h, inf, n = 1) {
+  const k = `stroke="${INK}" stroke-width="${.07 / n}"`; // n: statua ingrandita, il bordo resta sottile
   if (t === 'tree') {
     if (ruined) return `<g stroke="#4a3520" stroke-linecap="round" fill="none"><path d="M0 0L.75 -.45M0 0L-.7 -.55M0 0L-.6 .6M0 0L.55 .7M0 0L.1 -.9" stroke-width=".14"/>
       <path d="M.45 -.27L.6 -.05M-.42 -.33L-.5 -.1M-.35 .35L-.1 .55M.33 .42L.55 .35" stroke-width=".07"/></g><circle r=".24" fill="#5a4026" stroke="${INK}" stroke-width=".06"/>`;
@@ -830,7 +839,8 @@ function decorShape(t, ruined, w, h, inf) {
     brazier: `<circle r=".38" fill="#3a3a3a" ${k}/><circle r=".27" fill="${ruined ? '#2a2522' : '#e8662a'}"/>${ruined
       ? '<g fill="#555"><circle cx="-.08" cy=".05" r=".06"/><circle cx=".1" cy="-.06" r=".05"/></g>'
       : '<g fill="#ffc04d"><circle cx="-.08" cy=".04" r=".1"/><circle cx=".09" cy="-.06" r=".08"/><circle cx=".02" cy=".12" r=".06"/></g>'}`,
-    statue: `<rect x="-.42" y="-.42" width=".84" height=".84" fill="#8f8a82" ${k}/><ellipse rx=".3" ry=".15" cy=".06" fill="#c4beb4" stroke="#6a655e" stroke-width=".04"/><circle r=".16" cy="-.04" fill="#d6d0c6" stroke="#6a655e" stroke-width=".04"/>`,
+    statue: `<rect x="-.42" y="-.42" width=".84" height=".84" fill="#8f8a82" ${k}/>${n > 1 ? `<rect x="-.36" y="-.36" width=".72" height=".72" fill="none" stroke="#a7a198" stroke-width="${.03 / n}"/>` : ''}
+      <ellipse rx=".3" ry=".15" cy=".06" fill="#c4beb4" stroke="#6a655e" stroke-width="${.04 / n}"/><circle r=".16" cy="-.04" fill="#d6d0c6" stroke="#6a655e" stroke-width="${.04 / n}"/>`,
     altar: `<rect x="-.92" y="-.4" width="1.84" height=".8" fill="#9d978d" ${k}/><rect x="-.78" y="-.28" width="1.56" height=".56" fill="#b8b2a8"/><circle cx="-.6" r=".08" fill="#ffe2a6"/><circle cx=".6" r=".08" fill="#ffe2a6"/>`,
     boulder: `<path d="M-.38 -.1L-.2 -.38L.18 -.4L.4 -.12L.34 .28L0 .4L-.32 .3z" fill="#8a847a" ${k}/><path d="M-.18 -.28L.12 -.3L.2 -.12" stroke="#b5afa4" stroke-width=".05" fill="none"/>`,
     throne: `<rect x="-.95" y="-.95" width="1.9" height="1.9" rx=".08" fill="#6e1a26" ${k}/><rect x="-.82" y="-.82" width="1.64" height="1.64" fill="none" stroke="#d8a54a" stroke-width=".06"/>
@@ -864,7 +874,7 @@ function decorShape(t, ruined, w, h, inf) {
 // Disegno centrato in 0,0 a rotazione 0.
 function objShape(o, arrival) {
   const [w, h] = OBJ[o.type], frame = '#141210';
-  if (OBJ[o.type][3] !== 'pass') return decorShape(o.type, o.ruined, w, h, o.inf);
+  if (OBJ[o.type][3] !== 'pass') return decorShape(o.type, o.ruined, w, h, o.inf, o.n);
   const dash = arrival ? 'stroke="#ffe2a6" stroke-width=".12" stroke-dasharray=".35 .25"' : `stroke="${frame}" stroke-width=".12"`;
   if (o.type === 'stairs') {
     const n = 6;
@@ -879,6 +889,21 @@ function objShape(o, arrival) {
       <path d="M-.9 -1.1l.4.3-.2.3.5.2M.4 .9l.3-.3.3.15" stroke="#1a1714" stroke-width=".07" fill="none"/>` : '';
     const arrow = `<path d="M0 ${h / 2 - .35}V${-h / 2 + .55}" stroke="${frame}" stroke-width=".14"/><path d="M-.3 ${-h / 2 + .7}L0 ${-h / 2 + .3}L.3 ${-h / 2 + .7}z" fill="${frame}"/>`;
     return `<rect x="${-w / 2}" y="${-h / 2}" width="${w}" height="${h}" rx=".08" fill="#4b443c" ${dash}/>${steps}${ruin}${o.ruined ? '' : arrow}`;
+  }
+  if (o.type === 'spiral') {
+    // gradini a spicchio attorno al palo, più chiari = più in alto; si sale girando in senso orario
+    const n = 9, R = .9, r = .22, p = (rad, a) => `${(rad * Math.cos(a)).toFixed(3)} ${(rad * Math.sin(a)).toFixed(3)}`;
+    let steps = '';
+    for (let i = 0; i < n; i++) {
+      if (o.ruined && (i === 3 || i === 4)) continue;
+      const a0 = -Math.PI / 2 + i / n * 2 * Math.PI, a1 = a0 + 2 * Math.PI / n, c = 110 + (o.dir === 'down' ? n - 1 - i : i) * 12;
+      steps += `<path d="M${p(r, a0)}L${p(R, a0)}A${R} ${R} 0 0 1 ${p(R, a1)}L${p(r, a1)}z" fill="rgb(${c} ${c - 10} ${c - 24})" stroke="${frame}" stroke-width=".04"/>`;
+    }
+    const e = -Math.PI / 2 - .5, tip = [.58 * Math.cos(e), .58 * Math.sin(e)], t = [-Math.sin(e), Math.cos(e)], nrm = [Math.cos(e), Math.sin(e)];
+    const head = [[tip[0] + t[0] * .22, tip[1] + t[1] * .22], [tip[0] + nrm[0] * .13, tip[1] + nrm[1] * .13], [tip[0] - nrm[0] * .13, tip[1] - nrm[1] * .13]].map(q => q.map(v => v.toFixed(3)).join(' '));
+    const arrow = `<path d="M${p(.58, -Math.PI / 2 + .35)}A.58 .58 0 1 1 ${p(.58, e)}" stroke="${frame}" stroke-width=".1" fill="none"/><path d="M${head[0]}L${head[1]}L${head[2]}z" fill="${frame}"/>`;
+    const ruin = o.ruined ? `<g fill="#7d746a"><circle cx=".55" cy=".35" r=".12"/><circle cx=".3" cy=".6" r=".09"/><circle cx=".62" cy=".05" r=".08"/></g>` : '';
+    return `<circle r=".97" fill="#1a1714" ${dash}/>${steps}${ruin}<circle r="${r}" fill="#3a332c" stroke="${frame}" stroke-width=".06"/>${o.ruined ? '' : arrow}`;
   }
   if (o.type === 'ladder') return `${arrival ? `<rect x="-.5" y="-1" width="1" height="2" fill="none" ${dash}/>` : ''}${ladderShape(h - .1, o.ruined)}`;
   if (o.type === 'well') {
@@ -900,7 +925,7 @@ function objSvg(o, arrival, draggable) {
   const label = CLIMB.has(o.type) ? (o.dir === 'down' ? 'GIÙ' : 'SU') : '';
   const txt = (t, dy, col) => `<text x="${cx}" y="${cy + dy}" font-size=".55" font-weight="800" text-anchor="middle" dominant-baseline="central"
     fill="${col}" stroke="#000" stroke-width=".16" paint-order="stroke" font-family="system-ui, sans-serif">${t}</text>`;
-  return `<g opacity="${arrival ? .85 : 1}" ${draggable ? `data-oid="${o.id}"` : ''}><g transform="translate(${cx} ${cy}) rotate(${o.rot * 90})">${objShape(o, arrival)}</g>
+  return `<g opacity="${arrival ? .85 : 1}" ${draggable ? `data-oid="${o.id}"` : ''}><g transform="translate(${cx} ${cy}) rotate(${o.rot * 90})${o.n > 1 ? ` scale(${o.n})` : ''}">${objShape(o, arrival)}</g>
     ${label ? txt(label, o.ruined ? -.4 : 0, '#fff') : ''}${o.ruined && OBJ[o.type][3] === 'pass' ? txt('INAGIBILE', label ? .4 : 0, '#ff6b5e') : ''}</g>`;
 }
 
@@ -989,6 +1014,14 @@ function maps() {
     ${master ? `<button data-do="levelAdd" data-arg="up" data-mid="${cur.id}">+ Piano sopra</button>` : ''}
     ${levels.map(l => `<button data-do="levelPick" data-arg="${l.id}" data-mid="${cur.id}" class="${l === lv ? 'on' : ''}">${esc(l.name)}</button>`).join('')}
     ${master ? `<button data-do="levelAdd" data-arg="down" data-mid="${cur.id}">+ Piano sotto</button>` : ''}</nav></div>`;
+  // il piano sopra o sotto, in trasparenza sopra quello mostrato
+  const above = cur.levels.find(l => l.z === lv.z + 1), below = cur.levels.find(l => l.z === lv.z - 1);
+  const gl = ui.ghost === 'up' ? above : ui.ghost === 'down' ? below : null, op = ui.ghostOp ?? 40;
+  if (gl) view.ghost = { view: { ...levelView(cur, gl), arrivals: [] }, op: op / 100 };
+  const ghostBar = cur.levels.length < 2 ? '' : `<div class="toolgroup"><label>Vedi in trasparenza</label><div class="row" style="gap:4px">
+    ${[['', 'Nessuno', true], ['up', 'Piano sopra', above], ['down', 'Piano sotto', below]].map(([v, l, ok]) =>
+      `<button data-do="ghost" data-arg="${v}" class="${(gl ? ui.ghost : '') === v ? 'on' : ''}" ${ok ? '' : 'disabled'}>${l}</button>`).join('')}</div>
+    ${gl ? `<label style="margin-top:8px">Opacità: <span id="ghostval">${op}</span>%</label><input type="range" min="10" max="90" step="5" value="${op}" data-ghostop aria-label="Opacità del piano in trasparenza" style="padding:0">` : ''}</div>`;
   const tool = (on, d, extra, pic, label) => `<button type="button" class="tool ${on ? 'on' : ''}" data-do="${d}" ${extra} aria-pressed="${on}">${pic}<span>${label}</span></button>`;
   const group = (label, items) => `<div class="toolgroup"><label>${label}</label><div class="tools">${items}</div></div>`;
   // segnalini: il master li muove tutti, il giocatore solo i suoi
@@ -999,7 +1032,7 @@ function maps() {
       ? tool(false, 'tokRemove', `data-arg="${ui.tokChar}" data-mid="${cur.id}"`, icon('<path d="M2.5 2.5l5 5M7.5 2.5l-5 5" stroke="#e5484d" stroke-width="1.2" stroke-linecap="round"/>'), 'Togli dalla mappa') : '')
     || '<span class="muted">Nessun personaggio da mettere sulla mappa.</span>');
   const tokHint = 'Scegli un personaggio e clicca sulla mappa per metterlo lì, anche su un altro piano. Trascina un segnalino per spostarlo.';
-  if (!master) return stage(`${cur.levels.length > 1 ? levelBar : ''}${tokBar}${movable.length ? `<p class="muted">${tokHint}</p>` : ''}`, mapSvg(view, 'tok'));
+  if (!master) return stage(`${cur.levels.length > 1 ? levelBar + ghostBar : ''}${tokBar}${movable.length ? `<p class="muted">${tokHint}</p>` : ''}`, mapSvg(view, 'tok'));
 
   const b = ui.brush, ob = ui.obj, mode = ui.mapMode;
   const M_ = (f, label) => `<div><label>${label}</label><input type="number" class="n" min="1" max="${MAX_TILES}" data-m="${f}" data-mid="${cur.id}" value="${cur[f]}"></div>`;
@@ -1034,6 +1067,10 @@ function maps() {
         + tool(ob.type === 'erase', 'objSet', 'data-f="type" data-v="erase"', icon('<path d="M2.5 2.5l5 5M7.5 2.5l-5 5" stroke="#e5484d" stroke-width="1.2" stroke-linecap="round"/>'), 'Gomma'))
       + (OBJ[ob.type] ? group('Opzioni', [
         CLIMB.has(ob.type) ? tool(ob.dir !== 'down', 'objSet', 'data-f="dir" data-v="up"', objIcon({ ...sample, dir: 'up', rot: 0 }), 'Sale') + tool(ob.dir === 'down', 'objSet', 'data-f="dir" data-v="down"', objIcon({ ...sample, dir: 'down', rot: 0 }), 'Scende') : '',
+        ob.type === 'statue' ? STATUE_SIZES.map(([v, l]) => tool((+ob.n || 1) === v, 'objSet', `data-f="n" data-v="${v}"`,
+          // l'anteprima mostra la statua in proporzione: la colossale riempie il riquadro
+          icon(`<rect width="5" height="5" fill="url(#tex-pietra)"/><g transform="translate(2.5 2.5) scale(${v * 1.15})">${objShape({ type: 'statue' })}</g>`, '0 0 5 5'),
+          `${l} (${String(v * 1.5).replace('.', ',')} m)`)).join('') : '',
         ROUND.has(ob.type) ? '' : tool(false, 'objRotate', '', objIcon({ ...sample, rot: ob.rot }), `Ruota (${ob.rot * 90}°)`),
         ob.type === 'hole' || ob.type === 'pit' ? tool(ob.ladder, 'objToggle', 'data-f="ladder"', objIcon({ ...sample, ladder: true, ruined: false }), 'Con scala a pioli') : '',
         VEG.has(ob.type) ? VEG_STATES.map(([v, l]) => tool((ob.veg || 'lush') === v, 'objSet', `data-f="veg" data-v="${v}"`, objIcon({ type: ob.type, ruined: v === 'dry', inf: v === 'inf' }), l)).join('')
@@ -1052,7 +1089,7 @@ function maps() {
       </div>
       <p class="muted" style="margin-bottom:0">${cur.cols * TILE}×${cur.rows * TILE} quadretti = ${cur.cols * 15}×${cur.rows * 15} m · ogni tassello è 10×10 quadretti (15 m di lato)</p></div>
     ${stage(`
-      ${levelBar}
+      ${levelBar}${ghostBar}
       <div class="row" style="gap:8px;margin-bottom:12px">
         <div style="flex:1;min-width:160px"><label>Nome del piano</label><input data-lv="name" data-mid="${cur.id}" data-lid="${lv.id}" value="${esc(lv.name)}" aria-label="Nome del piano"></div>
         ${cur.levels.length > 1 ? `<button data-do="levelDel" data-arg="${lv.id}" data-mid="${cur.id}" style="align-self:end">Elimina piano</button>` : ''}
@@ -1203,7 +1240,7 @@ function mapClick(e, erase) {
       if (!OBJ[type]) return;
       const plant = VEG.has(type) && { ruined: veg === 'dry', inf: veg === 'inf' };
       if (plant && h?.type === type) return Object.assign(h, plant); // clic su una pianta uguale: ne cambia lo stato
-      const o = { id: rid(), type, rot: ROUND.has(type) ? 0 : rot, dir, ruined: type !== 'well' && ruined, ladder, ...plant };
+      const o = { id: rid(), type, rot: ROUND.has(type) ? 0 : rot, dir, ruined: type !== 'well' && ruined, ladder, ...plant, ...(type === 'statue' && +ui.obj.n > 1 && { n: +ui.obj.n }) };
       const [fw, fh] = footprint(o);
       // il quadretto cliccato sta al centro dell'oggetto
       o.x = Math.min(W - fw, Math.max(0, qx - Math.floor((fw - 1) / 2)));
@@ -1464,6 +1501,7 @@ const handlers = {
     for (const [cid, t] of Object.entries(m0.tokens || {})) if (dx || dy || n < 0) moveToken(m0.id, cid, { ...t, x: t.x + dx, y: t.y + dy });
   },
   objGroup: a => { ui.objGroup = a; saveUi(); render(); },
+  ghost: a => { ui.ghost = a || null; saveUi(); render(); },
   mapFull: () => {
     ui.mapFull = !ui.mapFull;
     // anche il browser a tutto schermo, se lo permette; Esc esce da entrambi
@@ -1562,6 +1600,13 @@ document.addEventListener('click', e => {
   else if (d.do) handlers[d.do](d.arg, d);
 });
 
+// mentre trascini il cursore dell'opacità la mappa cambia subito; al rilascio si salva (evento "change")
+document.addEventListener('input', e => {
+  if (!('ghostop' in e.target.dataset)) return;
+  $('#mapsvg [data-ghost]')?.setAttribute('opacity', e.target.value / 100);
+  $('#ghostval').textContent = e.target.value;
+});
+
 document.addEventListener('change', e => {
   const el = e.target, d = el.dataset, val = el.type === 'checkbox' ? el.checked : el.value;
   if (d.p) {
@@ -1586,6 +1631,7 @@ document.addEventListener('change', e => {
   else if (el.id === 'campsel') act('campaign.select', { id: val });
   else if (el.id === 'mappick') { ui.mapId = val; saveUi(); render(); }
   else if (el.id === 'tokfocus') { if (val) focusTok(val); }
+  else if ('ghostop' in d) { ui.ghostOp = +val; saveUi(); render(); }
 });
 
 $('#rollform').addEventListener('submit', async e => {
