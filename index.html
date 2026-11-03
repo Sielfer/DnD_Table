@@ -151,7 +151,7 @@ tr.cur > td:first-child { box-shadow: inset 3px 0 var(--gold); color: var(--gold
 .tool svg { display: block; border-radius: 6px; box-shadow: 0 0 0 1px var(--line); }
 .tool.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .tool.on:hover:not(:disabled) { background: var(--accent-soft); filter: none; }
-#mapsvg [data-oid], #mapsvg [data-door], #mapsvg [data-tok] { cursor: grab; touch-action: none; }
+#mapsvg [data-oid], #mapsvg [data-door], #mapsvg [data-tok], #mapsvg [data-note] { cursor: grab; touch-action: none; }
 #mapsvg .dragging { cursor: grabbing; opacity: .75; }
 /* Mappa grande con la tavolozza degli strumenti accanto (o staccata e libera), anche a tutto schermo */
 body[data-tab=maps] .layout { max-width: none; }
@@ -594,7 +594,7 @@ const GLYPH = new Set([E.porta, E.portaAperta, E.finestra, E.finestraAperta]);
 const TOGGLE = { [E.porta]: E.portaAperta, [E.portaAperta]: E.porta, [E.finestra]: E.finestraAperta, [E.finestraAperta]: E.finestra };
 const EDGE_TOOLS = [[E.muro, 'Muro'], [E.passaggio, 'Passaggio'], [E.porta, 'Porta'], [E.finestra, 'Finestra'], [E.aperto, 'Aperto'], ['toggle', 'Apri / chiudi'], ['flip', 'Senso di apertura']];
 const DOOR_LENS = [[0, 'Tutto il varco'], [1, '1,5 m'], [2, '3 m'], [3, '4,5 m']]; // larghezza di porte e finestre, in quadretti
-const MODES = [['brush', 'Dipingi tasselli'], ['edge', 'Porte, finestre e passaggi'], ['obj', 'Oggetti, arredo e natura'], ['tok', 'Personaggi']];
+const MODES = [['brush', 'Dipingi tasselli'], ['edge', 'Porte, finestre e passaggi'], ['obj', 'Oggetti, arredo e natura'], ['tok', 'Personaggi'], ['note', 'Note']];
 const DOT = ['#ffffff55', '#5fd38a', '#e3a85c', '#6fc3ff', '#e3a85c', '#9fd8ff', '#9fd8ff'];
 // Ogni lato è salvato una volta sola, sul tassello a ovest ("e") o a nord ("s"): i due vicini lo condividono.
 const edgeKey = (x, y, d) => (d === 'n' ? `${x},${y - 1},s` : d === 'w' ? `${x - 1},${y},e` : `${x},${y},${d}`);
@@ -764,7 +764,7 @@ function mapSvg(m, mode) {
   return `<svg ${mode ? 'id="mapsvg"' : ''} data-id="${m.id}" viewBox="-.5 -.5 ${W + 1} ${H + 1}" role="img" aria-label="Mappa ${esc(m.name)}"
     style="display:block;width:${ui.mapZoom ? `${(W + 1) * ui.mapZoom}px` : '100%'};max-width:none;border-radius:10px;cursor:${mode ? 'crosshair' : 'default'}">
     <rect x="-.5" y="-.5" width="${W + 1}" height="${H + 1}" fill="url(#tex-roccia)"/>
-    ${layerSvg(m, mode, true)}${ghost}${tokensSvg(m, mode)}${overlay}</svg>`;
+    ${layerSvg(m, mode, true)}${ghost}${tokensSvg(m, mode)}${notesSvg(m, mode)}${overlay}</svg>`;
 }
 
 // --- Oggetti sui quadretti: scale, pozzi, buchi ---
@@ -1002,6 +1002,39 @@ function tokensSvg(m, mode) {
       <text y="${.46 * k + .32}" font-size=".34" font-weight="700" text-anchor="middle" dominant-baseline="central" fill="#fff" stroke="#000" stroke-width=".12" paint-order="stroke" font-family="system-ui, sans-serif">${esc((c.name || '').slice(0, 14))}</text></g></g>`;
   }).join('');
 }
+// --- Note sulla mappa: un riquadro di testo con una freccia che punta a un punto ---
+// { id, text, x, y: centro del riquadro, ax, ay: punta della freccia, on: la vedono anche i giocatori }
+function wrapText(s, max) {
+  const lines = [];
+  for (const w of String(s).split(/\s+/)) {
+    if (lines.length && (lines.at(-1) + ' ' + w).length <= max) lines[lines.length - 1] += ' ' + w;
+    else lines.push(w);
+  }
+  return lines;
+}
+const noteBox = text => { const lines = wrapText(text, 26); return { lines, w: Math.max(...lines.map(l => l.length)) * .36 + .9, h: lines.length * .85 + .55 }; };
+function noteInner(n, editable) {
+  const { lines, w, h } = noteBox(n.text);
+  const dx = n.ax - n.x, dy = n.ay - n.y, len = Math.hypot(dx, dy), ux = dx / len, uy = dy / len;
+  // la freccia parte da dietro il riquadro; niente freccia se la punta è dentro il riquadro
+  const arrow = Math.abs(dx) > w / 2 + .3 || Math.abs(dy) > h / 2 + .3 ? (() => {
+    const bx = n.ax - ux * .7, by = n.ay - uy * .7, f = v => v.toFixed(2);
+    const head = `M${f(n.ax)} ${f(n.ay)}L${f(bx - uy * .32)} ${f(by + ux * .32)}L${f(bx + uy * .32)} ${f(by - ux * .32)}z`;
+    return `<path d="M${n.x} ${n.y}L${f(bx)} ${f(by)}" stroke="#2a2116" stroke-width=".26" stroke-linecap="round"/><path d="M${n.x} ${n.y}L${f(bx)} ${f(by)}" stroke="#f2d58a" stroke-width=".12"/>
+      <path d="${head}" fill="#f2d58a" stroke="#2a2116" stroke-width=".07" stroke-linejoin="round"/>`;
+  })() : '';
+  return `${arrow}${editable ? `<circle data-ntip cx="${n.ax}" cy="${n.ay}" r=".5" fill="transparent"/>` : ''}
+    <rect x="${n.x - w / 2}" y="${n.y - h / 2}" width="${w}" height="${h}" rx=".25" fill="#fff6dc" stroke="#5a4a2a" stroke-width=".08" ${n.on ? '' : 'stroke-dasharray=".3 .2"'}/>
+    <text x="${n.x}" y="${n.y - h / 2 + .27}" font-size=".62" text-anchor="middle" fill="#2a2116" font-family="Georgia, 'Times New Roman', serif">
+      ${lines.map((l, i) => `<tspan x="${n.x}" dy="${i ? .85 : .62}">${esc(l)}</tspan>`).join('')}</text>`;
+}
+// Il master vede anche le note spente (più chiare, bordo tratteggiato); in modalità "note" le trascina.
+function notesSvg(m, mode) {
+  if (ui.hideNotes) return '';
+  const editable = mode === 'note';
+  return (m.notes || []).map(n => `<g ${editable ? `data-note="${n.id}"` : 'pointer-events="none"'} ${n.on ? '' : 'opacity=".75"'}>${noteInner(n, editable)}</g>`).join('');
+}
+
 const objIcon = o => {
   const s = Math.max(3.4, ...baseDims(o).map(n => n + .4)); // gli oggetti lunghi entrano interi
   return icon(`<rect x="${-s / 2}" y="${-s / 2}" width="${s}" height="${s}" fill="url(#tex-pietra)"/>${objShape({ dir: 'up', rot: 0, ...o })}`, `${-s / 2} ${-s / 2} ${s} ${s}`);
@@ -1017,7 +1050,10 @@ function maps() {
   const z = ui.mapZoom, placed = Object.keys(cur.tokens || {}).filter(cid => S.characters[cid]);
   const goTo = placed.length ? `<select id="tokfocus" aria-label="Zoom su un personaggio" style="width:auto"><option value="">🔍 Zoom su…</option>
     ${placed.map(cid => `<option value="${cid}">${esc(S.characters[cid].name || 'Senza nome')}</option>`).join('')}</select>` : '';
+  // chiunque può nascondere le note dalla propria vista, per vedere meglio la mappa
+  const hasNotes = cur.levels.some(l => l.notes?.length);
   const bar = `<div class="mapbar">${picker}${master ? `<button data-do="undo" ${undo.length ? '' : 'disabled'} title="Annulla l'ultima modifica (Ctrl+Z)">↶ Annulla</button>` : ''}<span class="spacer"></span>${goTo}
+    ${hasNotes ? `<button data-do="notesView" class="${ui.hideNotes ? '' : 'on'}" aria-pressed="${!ui.hideNotes}" title="Mostra o nascondi le note nella tua vista">📝 Note</button>` : ''}
     <button data-do="zoom" data-arg="-1" aria-label="Rimpicciolisci la mappa" title="Rimpicciolisci (anche Ctrl + rotellina)">−</button><button data-do="zoom" data-arg="0" class="${z ? '' : 'on'}" title="Larga quanto lo spazio">Adatta</button><button data-do="zoom" data-arg="1" aria-label="Ingrandisci la mappa" title="Ingrandisci (anche Ctrl + rotellina)">+</button>
     <button data-do="mapFull">${ui.mapFull ? 'Esci da tutto schermo' : '⛶ Tutto schermo'}</button></div>`;
   const side = (d, what) => `<div class="grow grow-${d}"><span><button data-do="grow" data-arg="${d}" data-n="1" data-mid="${cur.id}" title="Aggiungi ${what}">+</button><button data-do="grow" data-arg="${d}" data-n="-1" data-mid="${cur.id}" title="Togli ${what}">−</button></span></div>`;
@@ -1081,6 +1117,13 @@ function maps() {
   } else if (mode === 'tok') {
     tools = tokBar;
     hint = tokHint;
+  } else if (mode === 'note') {
+    const ns = lv.notes || [], row = 'class="row" style="gap:6px;text-transform:none;letter-spacing:0;font-size:13px;color:inherit;margin-bottom:6px;align-items:flex-start"';
+    tools = ns.length ? `<div class="toolgroup"><label>Note di questo piano · spuntate = le vedono i giocatori</label>
+      ${ns.map(n => `<label ${row}><input type="checkbox" data-non="${n.id}" data-mid="${cur.id}" ${n.on ? 'checked' : ''}> <span>${esc(n.text.length > 60 ? n.text.slice(0, 60) + '…' : n.text)}</span></label>`).join('')}
+      <div class="row" style="gap:4px"><button data-do="notesAll" data-arg="1" data-mid="${cur.id}">Mostra tutte</button><button data-do="notesAll" data-arg="0" data-mid="${cur.id}">Nascondi tutte</button></div></div>`
+      : '<p class="muted">Nessuna nota su questo piano.</p>';
+    hint = 'Clic sulla mappa per scrivere una nota: la freccia punta dove hai cliccato. Trascina il riquadro o la punta della freccia per spostarli. Clic su una nota per cambiarne il testo, <b>tasto destro</b> per toglierla. Le note non spuntate le vedi solo tu (bordo tratteggiato); i giocatori vedono subito quelle che accendi.';
   } else {
     const st = OBJ[ob.type] ? ob.type : 'stairs', so = SIZE_OPTS[st]?.[sizeIdx(st)];
     const sample = { ...ob, type: st, ...(so && { w: so[0], h: so[1] }) };
@@ -1127,7 +1170,7 @@ function maps() {
       </nav>
       ${tools}
       <p class="muted">${hint}</p>
-      <p class="muted" style="margin-bottom:0;font-size:12px">Scorciatoie: <b>1–4</b> strumenti · <b>R</b> ruota · <b>Ctrl+Z</b> annulla · <b>Ctrl + rotellina</b> zoom · <b>+ / −</b> ai bordi della mappa per allargarla o stringerla da quel lato.</p>`, mapSvg(view, mode), mode !== 'tok')}`;
+      <p class="muted" style="margin-bottom:0;font-size:12px">Scorciatoie: <b>1–5</b> strumenti · <b>R</b> ruota · <b>Ctrl+Z</b> annulla · <b>Ctrl + rotellina</b> zoom · <b>+ / −</b> ai bordi della mappa per allargarla o stringerla da quel lato.</p>`, mapSvg(view, mode), mode !== 'tok')}`;
 }
 
 // Le mappe com'erano prima di ogni modifica del master, per "Annulla" (i segnalini no: li tiene il server).
@@ -1151,6 +1194,7 @@ function shiftMap(m, dx, dy) {
     l.edges = mv(l.edges);
     l.edoor = mv(l.edoor);
     for (const o of [...(l.objects || []), ...(l.doors || [])]) { o.x += dx * TILE; o.y += dy * TILE; }
+    for (const n of l.notes || []) { n.x += dx * TILE; n.y += dy * TILE; n.ax += dx * TILE; n.ay += dy * TILE; }
   }
 }
 // Toglie quello che è rimasto fuori dai bordi; restituisce quanti elementi sono stati tolti.
@@ -1251,6 +1295,7 @@ function mapClick(e, erase) {
     const [sx, sy] = toMap(svg, e), off = Math.floor((Math.max(1, space(c)) - 1) / 2); // il quadretto cliccato sta al centro
     return moveToken(m.id, c.id, { lv: curLevel(m).id, x: Math.floor(sx) - off, y: Math.floor(sy) - off });
   }
+  if (ui.mapMode === 'note') return noteClick(e, svg, m, erase);
   if (ui.mapMode === 'brush') return; // i tasselli si dipingono con il puntatore premuto (sotto)
   const [sx, sy] = toMap(svg, e), W = m.cols * TILE, H = m.rows * TILE;
   const tx = Math.min(m.cols - 1, Math.max(0, Math.floor(sx / TILE))), ty = Math.min(m.rows - 1, Math.max(0, Math.floor(sy / TILE)));
@@ -1311,6 +1356,22 @@ function mapClick(e, erase) {
   });
 }
 
+// Note: clic sul vuoto ne scrive una nuova (la freccia punta lì), clic su una nota la modifica, tasto destro la toglie.
+function noteClick(e, svg, m, erase) {
+  const id = e.target.closest?.('[data-note]')?.dataset.note, old = curLevel(m).notes?.find(n => n.id === id);
+  const edit = f => setMaps(ms => { const l = curLevel(ms.find(x => x.id === m.id)); l.notes ??= []; f(l); });
+  if (erase) return old && edit(l => { l.notes = l.notes.filter(n => n.id !== id); });
+  const text = prompt(old ? 'Testo della nota (lascia vuoto per toglierla)' : 'Testo della nota', old?.text || '');
+  if (text === null) return;
+  const t = text.trim().slice(0, 300);
+  if (old) return edit(l => { if (t) l.notes.find(n => n.id === id).text = t; else l.notes = l.notes.filter(n => n.id !== id); });
+  if (!t) return;
+  const [sx, sy] = toMap(svg, e), W = m.cols * TILE, H = m.rows * TILE, half = v => Math.round(v * 2) / 2, { w, h } = noteBox(t);
+  // il riquadro un po' in alto a destra della punta, tutto dentro la mappa
+  const fit = (v, size, max) => Math.min(Math.floor((max - size / 2) * 2) / 2, Math.max(Math.ceil(size / 2 * 2) / 2, half(v)));
+  edit(l => l.notes.push({ id: rid(), text: t, ax: half(sx), ay: half(sy), x: fit(sx + 2 + w / 2, w, W), y: fit(sy - 3, h, H), on: false }));
+}
+
 // Pennello: premi e trascina per dipingere più tasselli (tasto destro: roccia); si salva una volta sola al rilascio.
 let paint = null;
 function paintMove(e) {
@@ -1349,9 +1410,14 @@ addEventListener('wheel', e => {
 let drag = null, dragged = false;
 const toMap = (svg, e) => { const r = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal; return [(e.clientX - r.left) / r.width * vb.width + vb.x, (e.clientY - r.top) / r.height * vb.height + vb.y]; };
 addEventListener('pointerdown', e => {
-  const g = e.button === 0 && e.target.closest?.('#mapsvg [data-oid], #mapsvg [data-door], #mapsvg [data-tok]');
+  const g = e.button === 0 && e.target.closest?.('#mapsvg [data-oid], #mapsvg [data-door], #mapsvg [data-tok], #mapsvg [data-note]');
   if (!g) return;
   drag = { g, x0: e.clientX, y0: e.clientY, dx: 0, dy: 0, moved: false };
+  if (g.dataset.note) {
+    // la punta della freccia o tutto il riquadro (la punta resta dov'è)
+    const n = curLevel(S.maps.find(x => x.id === g.ownerSVGElement.dataset.id)).notes.find(x => x.id === g.dataset.note);
+    drag.note = { n, tip: !!e.target.closest('[data-ntip]'), at: n };
+  }
   if (g.dataset.door) {
     const m = S.maps.find(x => x.id === g.ownerSVGElement.dataset.id), view = { ...structuredClone(curLevel(m)), cols: m.cols, rows: m.rows };
     if (g.dataset.ek) delete view.edges[g.dataset.ek]; // la porta lascia il suo varco: lì torna il muro
@@ -1369,6 +1435,12 @@ addEventListener('pointermove', e => {
     drag.g.classList.add('dragging');
     return;
   }
+  if (drag.note) {
+    const { n, tip } = drag.note, dx = Math.round((e.clientX - drag.x0) * k * 2) / 2, dy = Math.round((e.clientY - drag.y0) * k * 2) / 2; // a mezzi quadretti
+    drag.note.at = tip ? { ...n, ax: n.ax + dx, ay: n.ay + dy } : { ...n, x: n.x + dx, y: n.y + dy };
+    drag.g.innerHTML = noteInner(drag.note.at, true);
+    return;
+  }
   drag.dx = Math.round((e.clientX - drag.x0) * k);
   drag.dy = Math.round((e.clientY - drag.y0) * k);
   drag.g.classList.add('dragging');
@@ -1381,6 +1453,10 @@ addEventListener('pointerup', () => {
   dragged = true;
   setTimeout(() => { dragged = false; }); // il click che segue il rilascio non deve posare un nuovo oggetto
   const mid = d.g.ownerSVGElement.dataset.id;
+  if (d.note) {
+    const { x, y, ax, ay } = d.note.at;
+    return setMaps(ms => Object.assign(curLevel(ms.find(m => m.id === mid)).notes.find(n => n.id === d.note.n.id) || {}, { x, y, ax, ay }));
+  }
   if (d.door) {
     if (!d.door.at) return render();
     return setMaps(ms => {
@@ -1546,6 +1622,8 @@ const handlers = {
   ghost: a => { ui.ghost = a || null; saveUi(); render(); },
   objSize: a => { ui.obj = { ...ui.obj, sz: { ...ui.obj.sz, [ui.obj.type]: +a } }; saveUi(); render(); },
   doorLen: a => { ui.doorLen = +a; saveUi(); render(); },
+  notesView: () => { ui.hideNotes = !ui.hideNotes; saveUi(); render(); },
+  notesAll: (a, d) => setMaps(ms => curLevel(ms.find(m => m.id === d.mid)).notes?.forEach(n => { n.on = a === '1'; })),
   mapFull: () => {
     ui.mapFull = !ui.mapFull;
     // anche il browser a tutto schermo, se lo permette; Esc esce da entrambi
@@ -1675,6 +1753,7 @@ document.addEventListener('change', e => {
   else if (el.id === 'campsel') act('campaign.select', { id: val });
   else if (el.id === 'mappick') { ui.mapId = val; saveUi(); render(); }
   else if (el.id === 'tokfocus') { if (val) focusTok(val); }
+  else if (d.non) setMaps(ms => { const n = curLevel(ms.find(m => m.id === d.mid)).notes?.find(x => x.id === d.non); if (n) n.on = el.checked; });
   else if ('ghostop' in d) { ui.ghostOp = +val; saveUi(); render(); }
 });
 

@@ -158,7 +158,9 @@ function view(u) {
     handouts: isMaster ? camp.handouts : camp.handouts.filter(h => h.visible),
     notes: isMaster ? camp.notes : undefined,
     story: camp.story ?? '',
-    maps: isMaster ? camp.maps ?? [] : (camp.maps ?? []).filter(m => m.visible),
+    // ai giocatori solo le mappe mostrate, e su ogni piano solo le note che il master ha acceso
+    maps: isMaster ? camp.maps ?? [] : (camp.maps ?? []).filter(m => m.visible)
+      .map(m => ({ ...m, levels: m.levels?.map(l => ({ ...l, notes: (l.notes || []).filter(n => n.on) })) })),
   };
 }
 
@@ -286,6 +288,10 @@ if (TEST) {
   actions.maps(master, { maps: [{ id: 'a', visible: true }, { id: 'b', visible: false }] });
   assert.deepStrictEqual(view(p).maps.map(m => m.id), ['a']);
   assert.strictEqual(view(master).maps.length, 2);
+  // note: al giocatore arrivano solo quelle accese, il master le vede tutte
+  actions.maps(master, { maps: [{ id: 'a', visible: true, levels: [{ id: 'L', notes: [{ id: 'n1', text: 'trappola', on: false }, { id: 'n2', text: 'altare', on: true }] }] }] });
+  assert.deepStrictEqual(view(p).maps[0].levels[0].notes.map(n => n.id), ['n2']);
+  assert.strictEqual(view(master).maps[0].levels[0].notes.length, 2);
   // segnalini: il giocatore muove il suo personaggio sulle mappe visibili, il master tutti
   const own = actions['char.create'](p, {}).id, other = actions['char.create'](master, {}).id;
   actions.maps(master, { maps: [{ id: 'a', visible: true, cols: 1, rows: 1, levels: [{ id: 'L' }] }, { id: 'b', visible: false, cols: 1, rows: 1, levels: [{ id: 'L' }] }] });
