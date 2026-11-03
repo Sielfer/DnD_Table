@@ -234,8 +234,22 @@ const actions = {
   story(u, a) { needMaster(u); C().story = String(a.story ?? ''); },
   maps(u, a) {
     needMaster(u);
-    if (!Array.isArray(a.maps)) fail('Mappe non valide');
+    if (!Array.isArray(a.maps) || !a.maps.every(m => m && typeof m === 'object')) fail('Mappe non valide');
+    // i segnalini si muovono solo con "token": una mappa vecchia del master non deve riportarli indietro
+    const old = C().maps ?? [];
+    for (const m of a.maps) { const o = old.find(x => x.id === m.id); if (o?.tokens) m.tokens = o.tokens; else delete m.tokens; }
     C().maps = a.maps;
+  },
+  // Segnalino di un personaggio su una mappa: { lv, x, y } in quadretti. Il giocatore muove solo il suo.
+  token(u, a) {
+    canEdit(u, a.char);
+    const m = (C(u).maps ?? []).find(x => x.id === a.map && (u.role === 'master' || x.visible));
+    if (!m) fail('Mappa inesistente', 404);
+    m.tokens ??= {};
+    if (a.remove) return void delete m.tokens[a.char];
+    const W = (m.cols || 1) * 10, H = (m.rows || 1) * 10, x = a.x, y = a.y;
+    if (!(m.levels ?? []).some(l => l.id === a.lv) || !Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x >= W || y >= H) fail('Posizione non valida');
+    m.tokens[a.char] = { lv: a.lv, x, y };
   },
 };
 
@@ -272,6 +286,22 @@ if (TEST) {
   actions.maps(master, { maps: [{ id: 'a', visible: true }, { id: 'b', visible: false }] });
   assert.deepStrictEqual(view(p).maps.map(m => m.id), ['a']);
   assert.strictEqual(view(master).maps.length, 2);
+  // segnalini: il giocatore muove il suo personaggio sulle mappe visibili, il master tutti
+  const own = actions['char.create'](p, {}).id, other = actions['char.create'](master, {}).id;
+  actions.maps(master, { maps: [{ id: 'a', visible: true, cols: 1, rows: 1, levels: [{ id: 'L' }] }, { id: 'b', visible: false, cols: 1, rows: 1, levels: [{ id: 'L' }] }] });
+  actions.token(p, { map: 'a', char: own, lv: 'L', x: 3, y: 4 });
+  assert.deepStrictEqual(view(p).maps[0].tokens[own], { lv: 'L', x: 3, y: 4 });
+  assert.throws(() => actions.token(p, { map: 'a', char: other, lv: 'L', x: 1, y: 1 }));
+  assert.throws(() => actions.token(p, { map: 'b', char: own, lv: 'L', x: 1, y: 1 }));
+  assert.throws(() => actions.token(p, { map: 'a', char: own, lv: 'L', x: 10, y: 0 }));
+  assert.throws(() => actions.token(p, { map: 'a', char: '__proto__', lv: 'L', x: 1, y: 1 }));
+  actions.token(master, { map: 'a', char: other, lv: 'L', x: 0, y: 0 });
+  actions.maps(master, { maps: [{ id: 'a', visible: true, cols: 1, rows: 1, levels: [{ id: 'L' }], tokens: {} }] });
+  assert.strictEqual(Object.keys(view(p).maps[0].tokens).length, 2); // il salvataggio delle mappe non li cancella
+  actions.token(p, { map: 'a', char: own, remove: true });
+  assert.deepStrictEqual(Object.keys(view(p).maps[0].tokens), [other]);
+  actions['char.delete'](p, { id: own });
+  actions['char.delete'](master, { id: other });
   assert.strictEqual(v.handouts.length, 0);
 
   // percorsi pericolosi in char.set

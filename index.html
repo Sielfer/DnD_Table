@@ -147,12 +147,32 @@ tr.cur > td:first-child { box-shadow: inset 3px 0 var(--gold); color: var(--gold
 .levels > button { text-align: left; }
 .toolgroup { margin-bottom: 12px; }
 .tools { display: flex; flex-wrap: wrap; gap: 6px; }
-.tool { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 78px; padding: 6px 8px 5px; font-size: 12px; font-weight: 500; }
+.tool { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 92px; padding: 7px 6px 6px; font-size: 12px; font-weight: 500; line-height: 1.2; }
 .tool svg { display: block; border-radius: 6px; box-shadow: 0 0 0 1px var(--line); }
 .tool.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .tool.on:hover:not(:disabled) { background: var(--accent-soft); filter: none; }
-#mapsvg [data-oid], #mapsvg [data-door] { cursor: grab; touch-action: none; }
+#mapsvg [data-oid], #mapsvg [data-door], #mapsvg [data-tok] { cursor: grab; touch-action: none; }
 #mapsvg .dragging { cursor: grabbing; opacity: .75; }
+/* Mappa grande con la tavolozza degli strumenti accanto (o staccata e libera), anche a tutto schermo */
+body[data-tab=maps] .layout { max-width: none; }
+.mapbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px; }
+.spacer { flex: 1; }
+.mapbody { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
+.mapbody.docked { grid-template-columns: auto minmax(0, 1fr); }
+.mapscroll { overflow: auto; max-height: calc(100vh - 160px); border-radius: 10px; }
+.palette { display: flex; flex-direction: column; width: 336px; max-height: calc(100vh - 160px); background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+.palette.min { width: auto; }
+.palette.floating { position: fixed; z-index: 45; box-shadow: 0 12px 40px rgb(0 0 0 / .35); }
+.palhead { display: flex; gap: 6px; align-items: center; padding: 6px 8px 6px 14px; border-bottom: 1px solid var(--line); cursor: move; user-select: none; touch-action: none; }
+.palette.min .palhead { border-bottom: 0; }
+.palhead button { padding: 3px 10px; }
+.palbody { overflow: auto; padding: 12px 14px; }
+.palette .maptabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.palette .maptabs button { padding: 6px 8px; line-height: 1.2; }
+.mapstage.full { position: fixed; inset: 0; z-index: 40; margin: 0; border-radius: 0; display: flex; flex-direction: column; }
+.mapstage.full .mapbody { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); }
+.mapstage.full .mapscroll, .mapstage.full .palette { max-height: 100%; }
+.mapstage.full .palette.floating { max-height: calc(100vh - 24px); }
 
 /* --- Scrollbar --- */
 * { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
@@ -163,6 +183,10 @@ tr.cur > td:first-child { box-shadow: inset 3px 0 var(--gold); color: var(--gold
   .layout, .sheetwrap { grid-template-columns: minmax(0, 1fr); }
   .layout { padding-bottom: 96px; }
   .sheetwrap { gap: 0; }
+  /* la tavolozza sta sopra la mappa */
+  .mapbody.docked { grid-template-columns: minmax(0, 1fr); }
+  .palette, .palette.floating { position: static; width: auto; max-height: 40vh; box-shadow: none; }
+  .mapstage.full .mapbody { grid-template-rows: auto minmax(0, 1fr); }
   /* Personaggi: una fila di "chip" scorrevole invece di una colonna */
   .charlist { display: flex; gap: 6px; align-items: center; overflow-x: auto; padding: 10px; }
   .charlist h2 { display: none; }
@@ -352,8 +376,9 @@ const SKILLS = [
 
 let S = null;
 let ui = { tab: 'sheets', charId: null, mapId: null, mapMode: 'brush', edgeTool: 2, brush: { kind: 'corr', w: 2, terrain: 'pietra' },
-  obj: { type: 'stairs', dir: 'up', rot: 0, ruined: false, ladder: true }, levels: {} };
+  obj: { type: 'stairs', dir: 'up', rot: 0, ruined: false, ladder: true, veg: 'lush' }, levels: {}, mapZoom: 28, palPos: null, palMin: false };
 try { Object.assign(ui, JSON.parse(localStorage.getItem('ui') || '{}')); } catch {}
+ui.mapFull = false; // il tutto schermo non sopravvive a un ricaricamento
 const saveUi = () => { try { localStorage.setItem('ui', JSON.stringify(ui)); } catch {} };
 const M = () => S.me.role === 'master';
 const canEdit = c => M() || c.owner === S.me.id;
@@ -690,7 +715,7 @@ function mapSvg(m, mode) {
   }
 
   let overlay = '';
-  if (mode) {
+  if (mode && mode !== 'tok') {
     let lines = '';
     for (let x = 1; x < m.cols; x++) lines += `M${x * TILE} 0V${H}`;
     for (let y = 1; y < m.rows; y++) lines += `M0 ${y * TILE}H${W}`;
@@ -705,12 +730,12 @@ function mapSvg(m, mode) {
     }
   }
   return `<svg ${mode ? 'id="mapsvg"' : ''} data-id="${m.id}" viewBox="-.5 -.5 ${W + 1} ${H + 1}" role="img" aria-label="Mappa ${esc(m.name)}"
-    style="display:block;width:100%;min-width:${W * 8}px;border-radius:10px;cursor:${mode ? 'crosshair' : 'default'}">
+    style="display:block;width:${ui.mapZoom ? `${(W + 1) * ui.mapZoom}px` : '100%'};max-width:none;border-radius:10px;cursor:${mode ? 'crosshair' : 'default'}">
     <rect x="-.5" y="-.5" width="${W + 1}" height="${H + 1}" fill="url(#tex-roccia)"/>
     ${rects}<rect width="${W}" height="${H}" fill="url(#mapgrid)"/>
     <path d="${walls}" stroke="#000" stroke-opacity=".35" stroke-width=".7" stroke-linecap="round" fill="none"/>
     <path d="${walls}" stroke="#2b2724" stroke-width=".3" stroke-linecap="square" fill="none"/>
-    ${glyphs}${(m.arrivals || []).map(o => objSvg(o, true)).join("")}${[...(m.objects || [])].sort((a, b) => (b.type === 'rug') - (a.type === 'rug')).map(o => objSvg(o, false, mode === 'obj')).join("")}${overlay}</svg>`;
+    ${glyphs}${(m.arrivals || []).map(o => objSvg(o, true)).join("")}${[...(m.objects || [])].sort((a, b) => FLAT.has(b.type) - FLAT.has(a.type)).map(o => objSvg(o, false, mode === 'obj')).join("")}${tokensSvg(m, mode)}${overlay}</svg>`;
 }
 
 // --- Oggetti sui quadretti: scale, pozzi, buchi ---
@@ -720,12 +745,17 @@ const OBJ = {
   bed: [1, 2, 'Letto', 'arredo'], chair: [1, 1, 'Sedia', 'arredo'], table: [2, 1, 'Tavolo', 'arredo'], barrel: [1, 1, 'Barile', 'arredo'], crate: [1, 1, 'Cassa', 'arredo'],
   chest: [1, 1, 'Baule', 'arredo'], mirror: [1, 1, 'Specchio', 'arredo'], rug: [2, 3, 'Tappeto', 'arredo'], shelf: [2, 1, 'Libreria', 'arredo'], wardrobe: [2, 1, 'Armadio', 'arredo'],
   brazier: [1, 1, 'Braciere', 'arredo'], statue: [1, 1, 'Statua', 'arredo'], altar: [2, 1, 'Altare', 'arredo'],
+  throne: [2, 2, 'Trono', 'regale'], canopy: [2, 3, 'Letto a baldacchino', 'regale'], banquet: [4, 2, 'Tavolo da banchetto', 'regale'], carpet: [2, 6, 'Passatoia reale', 'regale'],
+  candelabra: [1, 1, 'Candelabro', 'regale'], banner: [1, 1, 'Stendardo', 'regale'], coffer: [1, 1, 'Forziere reale', 'regale'], fountain: [2, 2, 'Fontana', 'regale'],
   bush: [1, 1, 'Cespuglio', 'natura'], tree: [2, 2, 'Albero', 'natura'], boulder: [1, 1, 'Masso', 'natura'],
 };
-const OBJ_GROUPS = [['pass', 'Scale, pozzi e buchi'], ['arredo', 'Arredo'], ['natura', 'Natura']];
+const OBJ_GROUPS = [['pass', 'Scale, pozzi e buchi'], ['arredo', 'Arredo'], ['regale', 'Arredo regale'], ['natura', 'Natura']];
 const CLIMB = new Set(['stairs', 'ladder']);
-const ROUND = new Set(['well', 'hole', 'pit', 'barrel', 'brazier', 'bush', 'tree']); // non si ruotano
-const ruinLabel = t => (OBJ[t]?.[3] === 'pass' ? 'Rovinata (inagibile)' : t === 'bush' || t === 'tree' ? 'Secco' : t === 'boulder' ? 'Spaccato' : 'Rotto');
+const ROUND = new Set(['well', 'hole', 'pit', 'barrel', 'brazier', 'bush', 'tree', 'candelabra', 'fountain']); // non si ruotano
+const FLAT = new Set(['rug', 'carpet']); // stanno sotto a tutto il resto
+const VEG = new Set(['bush', 'tree']);
+const VEG_STATES = [['lush', 'Rigogliosa'], ['dry', 'Secca'], ['inf', 'Infestata']];
+const ruinLabel = t => (OBJ[t]?.[3] === 'pass' ? 'Rovinata (inagibile)' : t === 'boulder' ? 'Spaccato' : t === 'candelabra' ? 'Spento' : t === 'fountain' ? 'Secca e rotta' : 'Rotto');
 const footprint = o => { const [w, h] = OBJ[o.type]; return o.rot % 2 ? [h, w] : [w, h]; };
 
 function ladderShape(L, ruined, scale = 1) {
@@ -744,20 +774,26 @@ function ladderShape(L, ruined, scale = 1) {
 
 // Arredo e natura, centrati in 0,0 a rotazione 0. Rotti: due metà spostate e schegge; piante: secche.
 const WOOD = '#a8703a', WOOD_D = '#7a4a1c', INK = '#141210';
-function decorShape(t, ruined, w, h) {
+// Pianta infestata: ragnatele e macchie di muffa viola.
+const blight = s => `<g transform="scale(${s})"><path d="M-.62 -.62L.62 .62M.62 -.62L-.62 .62M-.72 0H.72M0 -.72V.72" stroke="#eef" stroke-opacity=".5" stroke-width=".025"/>
+  <circle r=".3" fill="none" stroke="#eef" stroke-opacity=".5" stroke-width=".025"/><circle r=".56" fill="none" stroke="#eef" stroke-opacity=".4" stroke-width=".025"/>
+  <g fill="#9b5fc0" stroke="#3a1f4a" stroke-width=".03"><circle cx="-.45" cy="-.2" r=".12"/><circle cx=".3" cy="-.45" r=".1"/><circle cx=".45" cy=".3" r=".13"/><circle cx="-.2" cy=".45" r=".09"/><circle cx=".08" cy=".05" r=".07"/></g></g>`;
+function decorShape(t, ruined, w, h, inf) {
   const k = `stroke="${INK}" stroke-width=".07"`;
   if (t === 'tree') {
     if (ruined) return `<g stroke="#4a3520" stroke-linecap="round" fill="none"><path d="M0 0L.75 -.45M0 0L-.7 -.55M0 0L-.6 .6M0 0L.55 .7M0 0L.1 -.9" stroke-width=".14"/>
       <path d="M.45 -.27L.6 -.05M-.42 -.33L-.5 -.1M-.35 .35L-.1 .55M.33 .42L.55 .35" stroke-width=".07"/></g><circle r=".24" fill="#5a4026" stroke="${INK}" stroke-width=".06"/>`;
+    const [o, c, l, st] = inf ? ['#56603f', '#647048', '#8a8f6a', '#2c3320'] : ['#3f7a32', '#4d8f3c', '#6aab52', '#1f3d17'];
     return `<circle cx=".1" cy=".12" r=".92" fill="#000" opacity=".22"/>
-      <g stroke="#1f3d17" stroke-width=".06">${[[-.4, -.3, .5], [.38, -.32, .48], [.42, .35, .5], [-.36, .4, .48]].map(([x, y, r]) => `<circle cx="${x}" cy="${y}" r="${r}" fill="#3f7a32"/>`).join('')}<circle r=".55" fill="#4d8f3c"/></g>
-      <circle cx="-.2" cy="-.25" r=".22" fill="#6aab52" opacity=".7"/>`;
+      <g stroke="${st}" stroke-width=".06">${[[-.4, -.3, .5], [.38, -.32, .48], [.42, .35, .5], [-.36, .4, .48]].map(([x, y, r]) => `<circle cx="${x}" cy="${y}" r="${r}" fill="${o}"/>`).join('')}<circle r=".55" fill="${c}"/></g>
+      <circle cx="-.2" cy="-.25" r=".22" fill="${l}" opacity=".7"/>${inf ? blight(1) : ''}`;
   }
   if (t === 'bush') {
-    const [a, b, c] = ruined ? ['#8a7444', '#7a6a3a', '#6b5a32'] : ['#4f8a3a', '#5a9a42', '#467d33'];
-    return `<g stroke="${ruined ? '#4a3d22' : '#2f4f1f'}" stroke-width=".05"><circle cx="-.15" cy="-.1" r=".28" fill="${a}"/><circle cx=".17" cy="-.06" r=".26" fill="${b}"/><circle cy=".17" r=".27" fill="${c}"/></g>
-      ${ruined ? '<path d="M-.3 -.3l.15.1M.3 .25l-.12-.05M.25 -.32l-.05.12" stroke="#4a3d22" stroke-width=".05"/>' : '<circle cx="-.18" cy="-.16" r=".08" fill="#8cc46a"/>'}`;
+    const [a, b, c] = ruined ? ['#8a7444', '#7a6a3a', '#6b5a32'] : inf ? ['#5f6a45', '#6a7048', '#545e3c'] : ['#4f8a3a', '#5a9a42', '#467d33'];
+    return `<g stroke="${ruined ? '#4a3d22' : inf ? '#2c3320' : '#2f4f1f'}" stroke-width=".05"><circle cx="-.15" cy="-.1" r=".28" fill="${a}"/><circle cx=".17" cy="-.06" r=".26" fill="${b}"/><circle cy=".17" r=".27" fill="${c}"/></g>
+      ${ruined ? '<path d="M-.3 -.3l.15.1M.3 .25l-.12-.05M.25 -.32l-.05.12" stroke="#4a3d22" stroke-width=".05"/>' : inf ? blight(.45) : '<circle cx="-.18" cy="-.16" r=".08" fill="#8cc46a"/>'}`;
   }
+  const seats = [-1.4, -.7, 0, .7, 1.4], GOLD = '#d4a93c';
   const s = {
     bed: `<rect x="-.45" y="-.95" width=".9" height="1.9" rx=".08" fill="${WOOD_D}" ${k}/><rect x="-.37" y="-.5" width=".74" height="1.37" rx=".06" fill="#a8453c" stroke="#5e221d" stroke-width=".05"/>
       <path d="M-.37 -.3H.37" stroke="#d98a7a" stroke-width=".06"/><rect x="-.32" y="-.86" width=".64" height=".28" rx=".1" fill="#efe6d2" stroke="#8d8270" stroke-width=".04"/>`,
@@ -782,6 +818,28 @@ function decorShape(t, ruined, w, h) {
     statue: `<rect x="-.42" y="-.42" width=".84" height=".84" fill="#8f8a82" ${k}/><ellipse rx=".3" ry=".15" cy=".06" fill="#c4beb4" stroke="#6a655e" stroke-width=".04"/><circle r=".16" cy="-.04" fill="#d6d0c6" stroke="#6a655e" stroke-width=".04"/>`,
     altar: `<rect x="-.92" y="-.4" width="1.84" height=".8" fill="#9d978d" ${k}/><rect x="-.78" y="-.28" width="1.56" height=".56" fill="#b8b2a8"/><circle cx="-.6" r=".08" fill="#ffe2a6"/><circle cx=".6" r=".08" fill="#ffe2a6"/>`,
     boulder: `<path d="M-.38 -.1L-.2 -.38L.18 -.4L.4 -.12L.34 .28L0 .4L-.32 .3z" fill="#8a847a" ${k}/><path d="M-.18 -.28L.12 -.3L.2 -.12" stroke="#b5afa4" stroke-width=".05" fill="none"/>`,
+    throne: `<rect x="-.95" y="-.95" width="1.9" height="1.9" rx=".08" fill="#6e1a26" ${k}/><rect x="-.82" y="-.82" width="1.64" height="1.64" fill="none" stroke="#d8a54a" stroke-width=".06"/>
+      <path d="M-.6 -.4V-.8L-.4 -.65L-.2 -.88L0 -.68L.2 -.88L.4 -.65L.6 -.8V-.4z" fill="${GOLD}" ${k}/>
+      <rect x="-.62" y="-.42" width=".2" height=".95" rx=".06" fill="${GOLD}" ${k}/><rect x=".42" y="-.42" width=".2" height=".95" rx=".06" fill="${GOLD}" ${k}/>
+      <rect x="-.42" y="-.4" width=".84" height=".88" rx=".08" fill="#a3243a" stroke="#5e1420" stroke-width=".05"/><circle cy="-.62" r=".08" fill="#3e8ef7" stroke="${INK}" stroke-width=".03"/>`,
+    canopy: `<rect x="-.95" y="-1.45" width="1.9" height="2.9" rx=".06" fill="${WOOD_D}" ${k}/><rect x="-.8" y="-.9" width="1.6" height="2.2" rx=".06" fill="#5a3a7a" stroke="#d8a54a" stroke-width=".06"/>
+      <path d="M-.8 -.6H.8" stroke="#d8a54a" stroke-width=".05"/><rect x="-.72" y="-1.3" width=".64" height=".32" rx=".12" fill="#efe6d2" stroke="#8d8270" stroke-width=".04"/><rect x=".08" y="-1.3" width=".64" height=".32" rx=".12" fill="#efe6d2" stroke="#8d8270" stroke-width=".04"/>
+      <path d="M-.88 -1.3V1.3M.88 -1.3V1.3" stroke="#8e2f3a" stroke-width=".1" stroke-dasharray=".25 .08"/>
+      <g fill="${GOLD}" ${k}><circle cx="-.86" cy="-1.36" r=".1"/><circle cx=".86" cy="-1.36" r=".1"/><circle cx="-.86" cy="1.36" r=".1"/><circle cx=".86" cy="1.36" r=".1"/></g>`,
+    banquet: `${seats.map(x => `<rect x="${x - .22}" y="-.95" width=".44" height=".3" rx=".05" fill="${WOOD}" ${k}/><rect x="${x - .22}" y=".65" width=".44" height=".3" rx=".05" fill="${WOOD}" ${k}/>`).join('')}
+      <rect x="-1.9" y="-.55" width="3.8" height="1.1" rx=".06" fill="#e8e0cc" ${k}/><rect x="-1.9" y="-.15" width="3.8" height=".3" fill="#8e2f3a"/>
+      ${seats.map(x => `<circle cx="${x}" cy="-.35" r=".13" fill="#f7f3ea" stroke="#9a9384" stroke-width=".03"/><circle cx="${x}" cy=".35" r=".13" fill="#f7f3ea" stroke="#9a9384" stroke-width=".03"/>`).join('')}
+      <g fill="${GOLD}" stroke="${INK}" stroke-width=".02"><circle cx="-1.05" r=".07"/><circle cx=".35" r=".07"/><circle cx="1.05" r=".07"/></g><ellipse cx="-.35" rx=".25" ry=".12" fill="#c4693a" stroke="${INK}" stroke-width=".03"/>`,
+    carpet: `<rect x="-.8" y="-2.92" width="1.6" height="5.84" fill="#a01c2c" stroke="#5a1a22" stroke-width=".05"/><rect x="-.65" y="-2.77" width="1.3" height="5.54" fill="none" stroke="#d8a54a" stroke-width=".07"/>
+      <path d="M0 -.5L.35 0L0 .5L-.35 0z" fill="#d8a54a"/><path d="${[-.6, -.3, 0, .3, .6].map(x => `M${x} -2.92V-3M${x} 2.92V3`).join('')}" stroke="#d8a54a" stroke-width=".04"/>`,
+    candelabra: `${ruined ? '' : '<circle r=".48" fill="#ffc04d" opacity=".18"/>'}<circle r=".3" fill="#b8902f" ${k}/><path d="M-.32 0H.32M0 -.32V.32" stroke="${GOLD}" stroke-width=".08" stroke-linecap="round"/>
+      ${[[0, 0], [-.32, 0], [.32, 0], [0, -.32], [0, .32]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r=".08" fill="#efe6d2" stroke="${INK}" stroke-width=".02"/>${ruined ? '' : `<circle cx="${x}" cy="${y}" r=".05" fill="#ffc04d"/>`}`).join('')}`,
+    banner: `<path d="M-.43 -.38H.43" stroke="${GOLD}" stroke-width=".08" stroke-linecap="round"/><path d="M-.3 -.36H.3V.4L0 .2L-.3 .4z" fill="#8e2f3a" ${k}/>
+      <path d="M-.16 -.22H.16V.12L0 .02L-.16 .12z" fill="#d8a54a"/><circle cx="-.43" cy="-.38" r=".06" fill="${GOLD}"/><circle cx=".43" cy="-.38" r=".06" fill="${GOLD}"/>`,
+    coffer: `<rect x="-.42" y="-.3" width=".84" height=".6" rx=".08" fill="#4a2a5e" ${k}/><path d="M-.42 -.05H.42M-.25 -.3V.3M.25 -.3V.3" stroke="${GOLD}" stroke-width=".06"/>
+      <circle cy="-.05" r=".09" fill="#e5484d" stroke="${GOLD}" stroke-width=".03"/><g fill="#f2c14e" stroke="#8a6a1a" stroke-width=".02"><circle cx=".38" cy=".4" r=".07"/><circle cx=".24" cy=".44" r=".06"/><circle cx="-.36" cy=".42" r=".06"/></g>`,
+    fountain: `<circle r=".95" fill="url(#tex-pietra)" ${k}/><circle r=".75" fill="${ruined ? '#3a332c' : '#4a82bb'}" stroke="#4a4540" stroke-width=".06"/>
+      ${ruined ? '' : '<circle r=".75" fill="url(#tex-onde)"/><circle r=".46" fill="none" stroke="#cfe9f5" stroke-width=".04" opacity=".7"/>'}<circle r=".22" fill="#b3ada2" ${k}/><circle r=".1" fill="${ruined ? '#6c665d' : '#cfe9f5'}"/>`,
   }[t];
   if (!ruined) return s;
   return `<g clip-path="url(#half-a)" transform="translate(-.06 -.07) rotate(-7)">${s}</g><g clip-path="url(#half-b)" transform="translate(.06 .06) rotate(6)">${s}</g>
@@ -791,7 +849,7 @@ function decorShape(t, ruined, w, h) {
 // Disegno centrato in 0,0 a rotazione 0.
 function objShape(o, arrival) {
   const [w, h] = OBJ[o.type], frame = '#141210';
-  if (OBJ[o.type][3] !== 'pass') return decorShape(o.type, o.ruined, w, h);
+  if (OBJ[o.type][3] !== 'pass') return decorShape(o.type, o.ruined, w, h, o.inf);
   const dash = arrival ? 'stroke="#ffe2a6" stroke-width=".12" stroke-dasharray=".35 .25"' : `stroke="${frame}" stroke-width=".12"`;
   if (o.type === 'stairs') {
     const n = 6;
@@ -848,12 +906,12 @@ function levelView(m, lv) {
   const near = dz => m.levels.find(l => l.z === lv.z + dz);
   const fromAbove = (near(1)?.objects || []).filter(o => (CLIMB.has(o.type) && o.dir === 'down') || o.type === 'pit');
   const fromBelow = (near(-1)?.objects || []).filter(o => (CLIMB.has(o.type) && o.dir !== 'down') || o.type === 'hole');
-  return { ...lv, cols: m.cols, rows: m.rows, id: m.id, name: m.name, arrivals: [...fromAbove, ...fromBelow].map(flipObj) };
+  return { ...lv, cols: m.cols, rows: m.rows, id: m.id, name: m.name, lvId: lv.id, tokens: m.tokens, arrivals: [...fromAbove, ...fromBelow].map(flipObj) };
 }
 const levelName = z => (z > 0 ? `Piano ${z}` : z < 0 ? `Sotterraneo ${-z}` : 'Piano terra');
 
 // Anteprime per i bottoni degli strumenti
-const icon = (inner, vb = '0 0 10 10') => `<svg viewBox="${vb}" width="40" height="40" aria-hidden="true">${inner}</svg>`;
+const icon = (inner, vb = '0 0 10 10') => `<svg viewBox="${vb}" width="56" height="56" aria-hidden="true">${inner}</svg>`;
 function kindIcon(kind) {
   const m = { tiles: { '0,0': { kind, w: 2 } }, edges: kind === 'corr' ? { '0,0,e': 1, '0,0,s': 1, '-1,0,e': 1, '0,-1,s': 1 } : {} };
   let d = '';
@@ -863,16 +921,44 @@ function kindIcon(kind) {
 const edgeIcon = s => icon(`<rect x="-2.5" y="-.5" width="5" height="5" fill="url(#tex-pietra)"/>
   ${s === E.muro ? '<path d="M0 -.5V4.5" stroke="#2b2724" stroke-width=".4"/>' : s === E.aperto ? '' : '<path d="M0 -.5V0M0 4V4.5" stroke="#2b2724" stroke-width=".4"/>'}
   ${s === 'toggle' ? glyph(E.portaAperta, 4) : GLYPH.has(s) ? glyph(s, 4) : ''}`, '-2.5 -.5 5 5');
-const objIcon = o => icon(`<rect x="-1.7" y="-1.7" width="3.4" height="3.4" fill="url(#tex-pietra)"/>${objShape({ dir: 'up', rot: 0, ...o })}`, '-1.7 -1.7 3.4 3.4');
+const TOK_COLORS = ['#e5484d', '#3e8ef7', '#30a46c', '#f5a524', '#8e4ec6', '#12a594', '#e93d82', '#ad7f58'];
+const tokColor = cid => TOK_COLORS[Math.abs([...String(cid)].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) | 0, 0)) % TOK_COLORS.length];
+const initials = c => esc((c.name || '?').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase());
+const tokIcon = c => icon(`<circle cx="5" cy="5" r="4.3" fill="${tokColor(c.id)}" stroke="#111" stroke-width=".6"/>
+  <text x="5" y="5" font-size="3.8" font-weight="800" text-anchor="middle" dominant-baseline="central" fill="#fff" font-family="system-ui, sans-serif">${initials(c)}</text>`);
+// Segnalini dei personaggi sul piano mostrato; quelli che puoi muovere si trascinano.
+function tokensSvg(m, mode) {
+  return Object.entries(m.tokens || {}).filter(([cid, t]) => t.lv === m.lvId && S.characters[cid]).map(([cid, t]) => {
+    const c = S.characters[cid], mine = mode === 'tok' && (M() || c.owner === S.me.id);
+    return `<g ${mine ? `data-tok="${cid}"` : ''}><g transform="translate(${t.x + .5} ${t.y + .5})"><title>${esc(c.name || 'Senza nome')}</title>
+      <circle r=".46" fill="${tokColor(cid)}" stroke="${cid === ui.tokChar && mine ? '#fff' : '#111'}" stroke-width=".1"/>
+      <text font-size=".42" font-weight="800" text-anchor="middle" dominant-baseline="central" fill="#fff" font-family="system-ui, sans-serif">${initials(c)}</text>
+      <text y=".78" font-size=".34" font-weight="700" text-anchor="middle" dominant-baseline="central" fill="#fff" stroke="#000" stroke-width=".12" paint-order="stroke" font-family="system-ui, sans-serif">${esc((c.name || '').slice(0, 14))}</text></g></g>`;
+  }).join('');
+}
+const objIcon = o => {
+  const s = Math.max(3.4, ...OBJ[o.type].slice(0, 2).map(n => n + .4)); // gli oggetti lunghi entrano interi
+  return icon(`<rect x="${-s / 2}" y="${-s / 2}" width="${s}" height="${s}" fill="url(#tex-pietra)"/>${objShape({ dir: 'up', rot: 0, ...o })}`, `${-s / 2} ${-s / 2} ${s} ${s}`);
+};
 
 function maps() {
   const list = S.maps || [], master = M();
   list.forEach(levelsOf);
   const cur = list.find(m => m.id === ui.mapId) || list[0];
-  const side = `<div class="panel charlist"><h2>Mappe</h2>
-    ${list.map(m => `<button data-do="mapPick" data-arg="${m.id}" class="${m === cur ? 'on' : ''}">${esc(m.name || 'Senza nome')}${master && m.visible ? ' <small>· visibile</small>' : ''}</button>`).join('')}
-    ${master ? '<button data-do="mapNew">+ Nuova mappa</button>' : ''}</div>`;
-  if (!cur) return `<div class="sheetwrap">${side}<div class="panel muted">${master ? 'Crea una mappa per iniziare.' : 'Il master non ha ancora mostrato nessuna mappa.'}</div></div>`;
+  const newBtn = master ? '<button data-do="mapNew">+ Nuova mappa</button>' : '';
+  if (!cur) return `<div class="panel"><div class="row">${newBtn}<span class="muted">${master ? 'Crea una mappa per iniziare.' : 'Il master non ha ancora mostrato nessuna mappa.'}</span></div></div>`;
+  const picker = `<select id="mappick" aria-label="Mappa" style="width:auto;font-weight:600">${list.map(m => `<option value="${m.id}" ${m === cur ? 'selected' : ''}>${esc(m.name || 'Senza nome')}${master && m.visible ? ' · visibile' : ''}</option>`).join('')}</select>${newBtn}`;
+  const z = ui.mapZoom;
+  const bar = `<div class="mapbar">${picker}<span class="spacer"></span>
+    <button data-do="zoom" data-arg="-1" aria-label="Rimpicciolisci la mappa">−</button><button data-do="zoom" data-arg="0" class="${z ? '' : 'on'}" title="Larga quanto lo spazio">Adatta</button><button data-do="zoom" data-arg="1" aria-label="Ingrandisci la mappa">+</button>
+    <button data-do="mapFull">${ui.mapFull ? 'Esci da tutto schermo' : '⛶ Tutto schermo'}</button></div>`;
+  // la tavolozza: accanto alla mappa, oppure staccata dove l'hai trascinata
+  const p = ui.palPos, palette = body => `<aside class="palette ${p ? 'floating' : ''} ${ui.palMin ? 'min' : ''}" ${p ? `style="left:${Math.min(p.x, innerWidth - 160)}px;top:${Math.min(p.y, innerHeight - 50)}px"` : ''}>
+    <div class="palhead" title="Trascina per spostare gli strumenti"><b>Strumenti</b><span class="spacer"></span>
+      ${p ? '<button data-do="palDock" title="Rimetti accanto alla mappa">Aggancia</button>' : ''}<button data-do="palMin" aria-label="${ui.palMin ? 'Mostra' : 'Riduci'} gli strumenti">${ui.palMin ? 'Mostra' : '—'}</button></div>
+    ${ui.palMin ? '' : `<div class="palbody" data-sk="pal">${body}</div>`}</aside>`;
+  const stage = (body, svg) => `<div class="panel mapstage ${ui.mapFull ? 'full' : ''}">${bar}
+    <div class="mapbody ${p ? '' : 'docked'}">${palette(body)}<div class="mapscroll" data-sk="map">${svg}</div></div></div>`;
 
   const lv = curLevel(cur), view = levelView(cur, lv);
   const levels = [...cur.levels].sort((a, b) => b.z - a.z); // il piano più alto in cima
@@ -880,11 +966,19 @@ function maps() {
     ${master ? `<button data-do="levelAdd" data-arg="up" data-mid="${cur.id}">+ Piano sopra</button>` : ''}
     ${levels.map(l => `<button data-do="levelPick" data-arg="${l.id}" data-mid="${cur.id}" class="${l === lv ? 'on' : ''}">${esc(l.name)}</button>`).join('')}
     ${master ? `<button data-do="levelAdd" data-arg="down" data-mid="${cur.id}">+ Piano sotto</button>` : ''}</nav></div>`;
-  if (!master) return `<div class="sheetwrap">${side}<div class="panel"><h2>${esc(cur.name)}</h2>${cur.levels.length > 1 ? levelBar : ''}<div class="scroll">${mapSvg(view)}</div></div></div>`;
-
-  const b = ui.brush, ob = ui.obj, mode = ui.mapMode;
   const tool = (on, d, extra, pic, label) => `<button type="button" class="tool ${on ? 'on' : ''}" data-do="${d}" ${extra} aria-pressed="${on}">${pic}<span>${label}</span></button>`;
   const group = (label, items) => `<div class="toolgroup"><label>${label}</label><div class="tools">${items}</div></div>`;
+  // segnalini: il master li muove tutti, il giocatore solo i suoi
+  const movable = Object.values(S.characters).filter(c => master || c.owner === S.me.id);
+  const where = c => { const t = cur.tokens?.[c.id], l = t && cur.levels.find(x => x.id === t.lv); return !l ? ' (fuori)' : l === lv ? '' : ` (${l.name})`; };
+  const tokBar = group('Personaggi', movable.map(c => tool(ui.tokChar === c.id, 'tokPick', `data-arg="${c.id}"`, tokIcon(c), esc((c.name || 'Senza nome') + where(c)))).join('')
+    + (cur.tokens?.[ui.tokChar] && movable.some(c => c.id === ui.tokChar)
+      ? tool(false, 'tokRemove', `data-arg="${ui.tokChar}" data-mid="${cur.id}"`, icon('<path d="M2.5 2.5l5 5M7.5 2.5l-5 5" stroke="#e5484d" stroke-width="1.2" stroke-linecap="round"/>'), 'Togli dalla mappa') : '')
+    || '<span class="muted">Nessun personaggio da mettere sulla mappa.</span>');
+  const tokHint = 'Scegli un personaggio e clicca sulla mappa per metterlo lì, anche su un altro piano. Trascina un segnalino per spostarlo.';
+  if (!master) return stage(`${cur.levels.length > 1 ? levelBar : ''}${tokBar}${movable.length ? `<p class="muted">${tokHint}</p>` : ''}`, mapSvg(view, 'tok'));
+
+  const b = ui.brush, ob = ui.obj, mode = ui.mapMode;
   const M_ = (f, label) => `<div><label>${label}</label><input type="number" class="n" min="1" max="12" data-m="${f}" data-mid="${cur.id}" value="${cur[f]}"></div>`;
   let tools, hint;
   if (mode === 'brush') {
@@ -903,6 +997,9 @@ function maps() {
   } else if (mode === 'edge') {
     tools = group('Strumento per i lati', EDGE_TOOLS.map(([v, l]) => tool(String(ui.edgeTool) === String(v), 'edgeTool', `data-arg="${v}"`, edgeIcon(v), l)).join(''));
     hint = 'Clic su un pallino per mettere lo strumento scelto su quel lato, anche sul bordo esterno. Con <b>Apri / chiudi</b> apri e chiudi porte e finestre durante la partita: i giocatori lo vedono subito. <b>Aperto</b> toglie il muro e unisce due stanze grandi in una sala. Trascina una porta o una finestra per spostarla lungo il muro: si aggancia da sola ai muri vicini.';
+  } else if (mode === 'tok') {
+    tools = tokBar;
+    hint = tokHint;
   } else {
     const sample = { ...ob, type: OBJ[ob.type] ? ob.type : 'stairs' };
     tools = OBJ_GROUPS.map(([g, gl]) => group(gl, Object.entries(OBJ).filter(([, o]) => o[3] === g)
@@ -913,21 +1010,22 @@ function maps() {
         CLIMB.has(ob.type) ? tool(ob.dir !== 'down', 'objSet', 'data-f="dir" data-v="up"', objIcon({ ...sample, dir: 'up', rot: 0 }), 'Sale') + tool(ob.dir === 'down', 'objSet', 'data-f="dir" data-v="down"', objIcon({ ...sample, dir: 'down', rot: 0 }), 'Scende') : '',
         ROUND.has(ob.type) ? '' : tool(false, 'objRotate', '', objIcon({ ...sample, rot: ob.rot }), `Ruota (${ob.rot * 90}°)`),
         ob.type === 'hole' || ob.type === 'pit' ? tool(ob.ladder, 'objToggle', 'data-f="ladder"', objIcon({ ...sample, ladder: true, ruined: false }), 'Con scala a pioli') : '',
-        ob.type === 'well' || ((ob.type === 'hole' || ob.type === 'pit') && !ob.ladder) ? '' : tool(ob.ruined, 'objToggle', 'data-f="ruined"', objIcon({ ...sample, ruined: true }), ruinLabel(ob.type)),
+        VEG.has(ob.type) ? VEG_STATES.map(([v, l]) => tool((ob.veg || 'lush') === v, 'objSet', `data-f="veg" data-v="${v}"`, objIcon({ type: ob.type, ruined: v === 'dry', inf: v === 'inf' }), l)).join('')
+          : ob.type === 'well' || ((ob.type === 'hole' || ob.type === 'pit') && !ob.ladder) ? '' : tool(ob.ruined, 'objToggle', 'data-f="ruined"', objIcon({ ...sample, ruined: true }), ruinLabel(ob.type)),
       ].join('')) : '');
     hint = ob.type === 'erase' ? 'Clic su un oggetto per toglierlo.'
       : ob.type === 'ruin' ? 'Clic su un oggetto per romperlo o ripararlo, anche durante la partita (le scale diventano inagibili, le piante secche).'
-      : 'Clic sul quadretto dove mettere l\'oggetto; trascina un oggetto per spostarlo. Le scale che salgono o scendono, e i buchi nel soffitto o nel pavimento, compaiono da soli (tratteggiati) sul piano collegato.';
+      : 'Clic sul quadretto dove mettere l\'oggetto; trascina un oggetto per spostarlo. Le scale che salgono o scendono, e i buchi nel soffitto o nel pavimento, compaiono da soli (tratteggiati) sul piano collegato.'
+        + (VEG.has(ob.type) ? ' Clic su una pianta uguale già messa per cambiarne lo stato.' : '');
   }
-  return `<div class="sheetwrap">${side}<div>
-    <div class="panel"><div class="row" style="justify-content:space-between"><h2>${esc(cur.name)}</h2><button data-do="mapDel" data-arg="${cur.id}">Elimina mappa</button></div>
+  return `<div class="panel"><div class="row" style="justify-content:space-between"><h2>Impostazioni della mappa</h2><button data-do="mapDel" data-arg="${cur.id}">Elimina mappa</button></div>
       <div class="grid">
         <div><label>Nome</label><input data-m="name" data-mid="${cur.id}" value="${esc(cur.name)}" aria-label="Nome mappa"></div>
         ${M_('cols', 'Tasselli in larghezza')}${M_('rows', 'Tasselli in altezza')}
         <div><label>Giocatori</label><label class="row" style="gap:6px;text-transform:none;letter-spacing:0;font-size:14px;color:inherit"><input type="checkbox" data-m="visible" data-mid="${cur.id}" ${cur.visible ? 'checked' : ''}> mostra ai giocatori</label></div>
       </div>
       <p class="muted" style="margin-bottom:0">${cur.cols * TILE}×${cur.rows * TILE} quadretti = ${cur.cols * 15}×${cur.rows * 15} m · ogni tassello è 10×10 quadretti (15 m di lato)</p></div>
-    <div class="panel">
+    ${stage(`
       ${levelBar}
       <div class="row" style="gap:8px;margin-bottom:12px">
         <div style="flex:1;min-width:160px"><label>Nome del piano</label><input data-lv="name" data-mid="${cur.id}" data-lid="${lv.id}" value="${esc(lv.name)}" aria-label="Nome del piano"></div>
@@ -937,10 +1035,10 @@ function maps() {
         <button data-do="mapMode" data-arg="brush" class="${mode === 'brush' ? 'on' : ''}">Dipingi tasselli</button>
         <button data-do="mapMode" data-arg="edge" class="${mode === 'edge' ? 'on' : ''}">Porte, finestre e passaggi</button>
         <button data-do="mapMode" data-arg="obj" class="${mode === 'obj' ? 'on' : ''}">Oggetti, arredo e natura</button>
+        <button data-do="mapMode" data-arg="tok" class="${mode === 'tok' ? 'on' : ''}">Personaggi</button>
       </nav>
       ${tools}
-      <p class="muted">${hint}</p>
-      <div class="scroll">${mapSvg(view, mode)}</div></div></div></div>`;
+      <p class="muted" style="margin-bottom:0">${hint}</p>`, mapSvg(view, mode))}`;
 }
 
 function setMaps(f) {
@@ -952,9 +1050,24 @@ function setMaps(f) {
   act('maps', { maps: ms });
 }
 
+// Sposta un segnalino subito in locale, poi lo manda al server.
+function moveToken(mid, cid, pos) {
+  const m = S.maps.find(x => x.id === mid);
+  m.tokens = { ...m.tokens };
+  if (pos) m.tokens[cid] = pos; else delete m.tokens[cid];
+  render();
+  act('token', pos ? { map: mid, char: cid, ...pos } : { map: mid, char: cid, remove: true });
+}
+
 function mapClick(e) {
   if (dragged) return;
   const svg = e.target.closest('#mapsvg'), m = S.maps.find(x => x.id === svg.dataset.id);
+  if (!M() || ui.mapMode === 'tok') {
+    const c = S.characters[ui.tokChar];
+    if (!c || !(M() || c.owner === S.me.id)) return;
+    const [sx, sy] = toMap(svg, e), W = m.cols * TILE, H = m.rows * TILE;
+    return moveToken(m.id, c.id, { lv: curLevel(m).id, x: Math.min(W - 1, Math.max(0, Math.floor(sx))), y: Math.min(H - 1, Math.max(0, Math.floor(sy))) });
+  }
   const r = svg.getBoundingClientRect(), W = m.cols * TILE, H = m.rows * TILE;
   // il viewBox ha mezzo quadretto di margine per lato
   const sx = (e.clientX - r.left) / r.width * (W + 1) - .5, sy = (e.clientY - r.top) / r.height * (H + 1) - .5;
@@ -967,13 +1080,15 @@ function mapClick(e) {
     if (ui.mapMode === 'obj') {
       const qx = Math.min(W - 1, Math.max(0, Math.floor(sx))), qy = Math.min(H - 1, Math.max(0, Math.floor(sy)));
       const inside = o => { const [fw, fh] = footprint(o); return qx >= o.x && qx < o.x + fw && qy >= o.y && qy < o.y + fh; };
-      let hit = lv.objects.findLastIndex(o => o.type !== 'rug' && inside(o)); // il tappeto sta sotto: prima ciò che c'è sopra
+      let hit = lv.objects.findLastIndex(o => !FLAT.has(o.type) && inside(o)); // i tappeti stanno sotto: prima ciò che c'è sopra
       if (hit < 0) hit = lv.objects.findLastIndex(inside);
-      const { type, rot, dir, ruined, ladder } = ui.obj;
+      const { type, rot, dir, ruined, ladder, veg = 'lush' } = ui.obj, h = lv.objects[hit];
       if (type === 'erase') { if (hit >= 0) lv.objects.splice(hit, 1); return; }
-      if (type === 'ruin') { if (hit >= 0 && lv.objects[hit].type !== 'well') lv.objects[hit].ruined = !lv.objects[hit].ruined; return; }
+      if (type === 'ruin') { if (h && h.type !== 'well') { h.ruined = !h.ruined; delete h.inf; } return; }
       if (!OBJ[type]) return;
-      const o = { id: rid(), type, rot: ROUND.has(type) ? 0 : rot, dir, ruined: type !== 'well' && ruined, ladder };
+      const plant = VEG.has(type) && { ruined: veg === 'dry', inf: veg === 'inf' };
+      if (plant && h?.type === type) return Object.assign(h, plant); // clic su una pianta uguale: ne cambia lo stato
+      const o = { id: rid(), type, rot: ROUND.has(type) ? 0 : rot, dir, ruined: type !== 'well' && ruined, ladder, ...plant };
       const [fw, fh] = footprint(o);
       // il quadretto cliccato sta al centro dell'oggetto
       o.x = Math.min(W - fw, Math.max(0, qx - Math.floor((fw - 1) / 2)));
@@ -1018,7 +1133,7 @@ function mapClick(e) {
 let drag = null, dragged = false;
 const toMap = (svg, e) => { const r = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal; return [(e.clientX - r.left) / r.width * vb.width + vb.x, (e.clientY - r.top) / r.height * vb.height + vb.y]; };
 addEventListener('pointerdown', e => {
-  const g = e.button === 0 && e.target.closest?.('#mapsvg [data-oid], #mapsvg [data-door]');
+  const g = e.button === 0 && e.target.closest?.('#mapsvg [data-oid], #mapsvg [data-door], #mapsvg [data-tok]');
   if (!g) return;
   drag = { g, x0: e.clientX, y0: e.clientY, dx: 0, dy: 0, moved: false };
   if (g.dataset.door) {
@@ -1058,6 +1173,12 @@ addEventListener('pointerup', () => {
       if (ek) { delete lv.edges[ek]; lv.doors.push({ id: rid(), s: d.door.s, ...d.door.at }); }
       else Object.assign(lv.doors.find(x => x.id === did) || {}, d.door.at);
     });
+  }
+  const cid = d.g.dataset.tok, t = cid && S.maps.find(x => x.id === mid)?.tokens?.[cid];
+  if (cid) {
+    const m = S.maps.find(x => x.id === mid);
+    if (t) moveToken(mid, cid, { lv: t.lv, x: Math.min(m.cols * TILE - 1, Math.max(0, t.x + d.dx)), y: Math.min(m.rows * TILE - 1, Math.max(0, t.y + d.dy)) });
+    return;
   }
   setMaps(ms => {
     const m = ms.find(x => x.id === mid), o = curLevel(m).objects?.find(x => x.id === d.g.dataset.oid);
@@ -1121,7 +1242,11 @@ function render() {
 
   const a = document.activeElement, key = a && keyOf(a);
   const keep = key && { v: a.value, s: a.selectionStart, e: a.selectionEnd };
+  // la mappa e la tavolozza non devono tornare in cima a ogni clic
+  const sk = [...$('#main').querySelectorAll('[data-sk]')].map(el => [el.dataset.sk, el.scrollLeft, el.scrollTop]);
+  document.body.dataset.tab = ui.tab;
   $('#main').innerHTML = ({ sheets, combat, handouts, story, maps }[ui.tab] || sheets)();
+  for (const [k, l, t] of sk) { const el = $(`#main [data-sk="${k}"]`); if (el) { el.scrollLeft = l; el.scrollTop = t; } }
   if (keep) {
     const el = [...$('#main').querySelectorAll('input,textarea,select')].find(x => keyOf(x) === key);
     if (el) {
@@ -1177,13 +1302,34 @@ const handlers = {
   }),
   tDel: a => setTracker(t => { if (+a < t.turn) t.turn--; t.list.splice(+a, 1); }),
   tReset: () => confirm('Terminare il combattimento e svuotare il tracker?') && setTracker(t => { t.list = []; t.round = 1; t.turn = 0; }),
-  mapPick: a => { ui.mapId = a; saveUi(); render(); },
+  zoom: a => {
+    // tiene al centro lo stesso punto della mappa
+    const sc = $('.mapscroll'), svg = sc.querySelector('svg'), now = ui.mapZoom || svg.getBoundingClientRect().width / svg.viewBox.baseVal.width;
+    const fx = (sc.scrollLeft + sc.clientWidth / 2) / sc.scrollWidth, fy = (sc.scrollTop + sc.clientHeight / 2) / sc.scrollHeight;
+    ui.mapZoom = +a ? Math.round(Math.min(80, Math.max(6, now * (+a > 0 ? 1.25 : .8)))) : 0;
+    saveUi();
+    render();
+    const n = $('.mapscroll');
+    n.scrollLeft = fx * n.scrollWidth - n.clientWidth / 2;
+    n.scrollTop = fy * n.scrollHeight - n.clientHeight / 2;
+  },
+  mapFull: () => {
+    ui.mapFull = !ui.mapFull;
+    // anche il browser a tutto schermo, se lo permette; Esc esce da entrambi
+    if (ui.mapFull) document.documentElement.requestFullscreen?.().catch(() => {});
+    else if (document.fullscreenElement) document.exitFullscreen();
+    render();
+  },
+  palMin: () => { ui.palMin = !ui.palMin; saveUi(); render(); },
+  palDock: () => { ui.palPos = null; saveUi(); render(); },
   mapMode: a => { ui.mapMode = a; saveUi(); render(); },
   brushSet: (_, d) => { ui.brush = { ...ui.brush, [d.f]: d.f === 'w' ? num(d.v) : d.v }; saveUi(); render(); },
   edgeTool: a => { ui.edgeTool = a === 'toggle' ? a : num(a); saveUi(); render(); },
   objSet: (_, d) => { ui.obj = { ...ui.obj, [d.f]: d.v }; saveUi(); render(); },
   objToggle: (_, d) => { ui.obj = { ...ui.obj, [d.f]: !ui.obj[d.f] }; saveUi(); render(); },
   objRotate: () => { ui.obj = { ...ui.obj, rot: (ui.obj.rot + 1) % 4 }; saveUi(); render(); },
+  tokPick: a => { ui.tokChar = ui.tokChar === a ? null : a; saveUi(); render(); },
+  tokRemove: (a, d) => moveToken(d.mid, a, null),
   levelPick: (a, d) => { ui.levels = { ...ui.levels, [d.mid]: a }; saveUi(); render(); },
   levelAdd: (a, d) => setMaps(ms => {
     const m = ms.find(x => x.id === d.mid), zs = m.levels.map(l => l.z);
@@ -1216,7 +1362,34 @@ const handlers = {
   async logout() { await fetch('/api/logout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }); location.reload(); },
 };
 
-addEventListener('keydown', e => { if (e.key === 'Escape') setDice(false); });
+addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  setDice(false);
+  if (ui.mapFull && !document.fullscreenElement) { ui.mapFull = false; render(); }
+});
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && ui.mapFull) { ui.mapFull = false; render(); } });
+
+// La tavolozza si stacca e si sposta trascinandone la testata.
+let pal = null;
+addEventListener('pointerdown', e => {
+  const h = e.button === 0 && !e.target.closest('button') && e.target.closest?.('.palhead');
+  if (!h || narrow.matches) return;
+  const r = h.parentElement.getBoundingClientRect();
+  pal = { el: h.parentElement, dx: e.clientX - r.left, dy: e.clientY - r.top };
+  e.preventDefault();
+});
+addEventListener('pointermove', e => {
+  if (!pal) return;
+  pal.x = Math.max(0, Math.min(innerWidth - 160, e.clientX - pal.dx));
+  pal.y = Math.max(0, Math.min(innerHeight - 50, e.clientY - pal.dy));
+  pal.el.classList.add('floating');
+  Object.assign(pal.el.style, { left: pal.x + 'px', top: pal.y + 'px' });
+});
+addEventListener('pointerup', () => {
+  const p = pal;
+  pal = null;
+  if (p?.x !== undefined) { ui.palPos = { x: p.x, y: p.y }; saveUi(); render(); }
+});
 narrow.addEventListener('change', () => setDice(false));
 
 document.addEventListener('click', e => {
@@ -1253,6 +1426,7 @@ document.addEventListener('change', e => {
   else if ('water' in d) { ui.brush = { ...ui.brush, water: hex(val) }; saveUi(); render(); }
   else if (d.lv) setMaps(ms => { const l = ms.find(x => x.id === d.mid).levels.find(x => x.id === d.lid); l.name = val || l.name; });
   else if (el.id === 'campsel') act('campaign.select', { id: val });
+  else if (el.id === 'mappick') { ui.mapId = val; saveUi(); render(); }
 });
 
 $('#rollform').addEventListener('submit', async e => {
