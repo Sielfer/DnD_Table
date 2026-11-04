@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "start": "node server.js",
-    "test": "node server.js --test",
+    "test": "node server.js --test && node test-mappe.js",
     "build": "node build.js"
   }
 }

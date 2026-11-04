@@ -138,6 +138,30 @@ function auth(req) {
 }
 
 // --- Stato visto da ciascun utente (i giocatori non vedono i segreti del master) ---
+// Nebbia di guerra: di un piano con la nebbia accesa ai giocatori arriva solo ciò che sta nei tasselli rivelati.
+const T = 10; // quadretti per tassello, come nella pagina
+const fogOn = (l, x, y) => !l.fog?.on || !!l.fog.shown?.[Math.floor(x / T) + ',' + Math.floor(y / T)]; // x, y in quadretti
+function fogLevel(l) {
+  if (!l.fog?.on) return l;
+  const tile = (x, y) => !!l.fog.shown?.[x + ',' + y];
+  const keep = (o, ok) => Object.fromEntries(Object.entries(o || {}).filter(([k]) => { const [x, y, d] = k.split(','); return ok(+x, +y, d); }));
+  const edge = (x, y, d) => tile(x, y) || (d === 'e' ? tile(x + 1, y) : tile(x, y + 1)); // basta uno dei due tasselli del lato
+  return {
+    ...l, tiles: keep(l.tiles, tile), edges: keep(l.edges, edge), edoor: keep(l.edoor, edge),
+    objects: (l.objects || []).filter(o => fogOn(l, o.x, o.y)),
+    doors: (l.doors || []).filter(d => fogOn(l, d.x, d.y) || (d.v ? fogOn(l, d.x - 1, d.y) : fogOn(l, d.x, d.y - 1))),
+  };
+}
+// Ai giocatori: le mappe mostrate, senza ciò che è nella nebbia, solo le note accese,
+// e i segnalini rivelati (i propri sempre).
+function playerMap(m, u, camp) {
+  const lv = id => m.levels?.find(l => l.id === id);
+  const tokens = Object.fromEntries(Object.entries(m.tokens || {}).filter(([cid, t]) => camp.characters[cid]?.owner === u.id || !lv(t.lv) || fogOn(lv(t.lv), t.x, t.y)));
+  return { ...m, tokens, levels: m.levels?.map(l => ({ ...fogLevel(l), notes: (l.notes || []).filter(n => n.on) })) };
+}
+// Schede "solo master" (mostri, PNG): ai giocatori solo quanto basta per il segnalino.
+const playerChars = chars => Object.fromEntries(Object.entries(chars).map(([k, c]) => [k, c.secret ? { id: c.id, name: c.name, size: c.size, owner: c.owner, secret: true } : c]));
+
 function view(u) {
   const isMaster = u.role === 'master';
   const camp = C(u), t = camp.tracker;
@@ -147,7 +171,7 @@ function view(u) {
     campaigns: Object.values(db.campaigns).map(({ id, name }) => ({ id, name })),
     active: camp.id,
     live: db.active,
-    characters: camp.characters,
+    characters: isMaster ? camp.characters : playerChars(camp.characters),
     tracker: isMaster ? t : {
       round: t.round,
       list: t.list.map((c, i) => ({ ...c, current: i === t.turn }))
@@ -158,9 +182,7 @@ function view(u) {
     handouts: isMaster ? camp.handouts : camp.handouts.filter(h => h.visible),
     notes: isMaster ? camp.notes : undefined,
     story: camp.story ?? '',
-    // ai giocatori solo le mappe mostrate, e su ogni piano solo le note che il master ha acceso
-    maps: isMaster ? camp.maps ?? [] : (camp.maps ?? []).filter(m => m.visible)
-      .map(m => ({ ...m, levels: m.levels?.map(l => ({ ...l, notes: (l.notes || []).filter(n => n.on) })) })),
+    maps: isMaster ? camp.maps ?? [] : (camp.maps ?? []).filter(m => m.visible).map(m => playerMap(m, u, camp)),
   };
 }
 
@@ -179,6 +201,15 @@ function canEdit(u, cid) {
   return c;
 }
 
+// Valori delle schede: la pagina scrive solo testo, numeri e sì/no; le liste (attacchi, abilità) sono righe di questi.
+// Così nessuno può mandare dati che fanno andare in errore la pagina degli altri.
+const scalar = v => v === null || typeof v === 'boolean' || Number.isFinite(v) || (typeof v === 'string' && v.length <= 20000);
+const row = r => r && typeof r === 'object' && !Array.isArray(r) && Object.keys(r).length <= 50 && Object.values(r).every(scalar);
+const LISTS = ['attacks', 'skills'];
+// campi con dentro altri campi; tutto il resto della scheda è un valore semplice
+const NESTED = ['abil', 'hp', 'saves', 'ac', 'money', 'spells', ...LISTS];
+const validValue = (p, v) => (LISTS.includes(p[0]) && p.length === 1 ? Array.isArray(v) && v.length <= 1000 && v.every(row)
+  : LISTS.includes(p[0]) && p.length === 2 ? row(v) : scalar(v));
 const campaignName = n => String(n || '').trim().slice(0, 80) || fail('Nome campagna obbligatorio');
 const actions = {
   'campaign.create'(u, a) { needMaster(u); newCampaign(campaignName(a.name)); },
@@ -195,14 +226,18 @@ const actions = {
   'char.create'(u, a) {
     const data = a.data && typeof a.data === 'object' && !Array.isArray(a.data) ? a.data : {};
     const cid = id();
-    C(u).characters[cid] = { ...data, id: cid, owner: u.id };
+    // tiene solo i campi validi (la pagina manda nome ed elenco delle abilità)
+    const ok = Object.fromEntries(Object.entries(data).filter(([k, v]) => !BAD_KEYS.includes(k) && !['secret', 'id', 'owner'].includes(k) && validValue([k], v)));
+    C(u).characters[cid] = { ...ok, id: cid, owner: u.id };
     return { id: cid };
   },
   'char.set'(u, a) {
     const c = canEdit(u, a.id);
     const p = a.path;
-    if (!Array.isArray(p) || !p.length || ['id', 'owner'].includes(p[0])
+    if (!Array.isArray(p) || !p.length || ['id', 'owner'].includes(p[0]) || (p.length > 1 && !NESTED.includes(p[0]))
       || !p.every(k => (typeof k === 'string' || (Number.isInteger(k) && k >= 0 && k < 1000)) && !BAD_KEYS.includes(k))) fail('Campo non valido');
+    if (!validValue(p, a.value)) fail('Valore non valido');
+    if (p[0] === 'secret') needMaster(u); // "solo master": la decide il master
     let o = c;
     for (const k of p.slice(0, -1)) o = o[k] = o[k] && typeof o[k] === 'object' ? o[k] : {};
     o[p.at(-1)] = a.value;
@@ -313,9 +348,32 @@ if (TEST) {
   // percorsi pericolosi in char.set
   const cid = actions['char.create'](p, {}).id;
   actions['char.set'](p, { id: cid, path: ['attacks', 0, 'name'], value: 'Ascia' });
-  for (const path of [['attacks', 1e9, 'name'], ['attacks', -1], ['__proto__', 'x'], ['owner']]) {
+  for (const path of [['attacks', 1e9, 'name'], ['attacks', -1], ['__proto__', 'x'], ['owner'], ['name', 'x'], ['secret']]) {
     assert.throws(() => actions['char.set'](p, { id: cid, path, value: 1 }), String(path));
   }
+  // valori che manderebbero in errore la pagina degli altri
+  for (const [path, value] of [[['skills'], 5], [['skills', 0], null], [['name'], { x: 1 }], [['attacks'], [[1]]], [['hp', 'cur'], 'x'.repeat(30000)]]) {
+    assert.throws(() => actions['char.set'](p, { id: cid, path, value }), JSON.stringify(path));
+  }
+  actions['char.set'](p, { id: cid, path: ['skills'], value: [{ name: 'Nuotare', ab: 'str', acp: true }] });
+  assert.strictEqual(actions['char.create'](p, { data: { name: 'X', secret: true, skills: 7 } }) && Object.values(C(p).characters).some(c => c.secret || c.skills === 7), false);
+  // schede "solo master": ai giocatori arriva solo nome e taglia
+  const drago = actions['char.create'](master, { data: { name: 'Drago', size: 'Enorme' } }).id;
+  actions['char.set'](master, { id: drago, path: ['hp', 'max'], value: 200 });
+  actions['char.set'](master, { id: drago, path: ['secret'], value: true });
+  assert.deepStrictEqual(Object.keys(view(p).characters[drago]).sort(), ['id', 'name', 'owner', 'secret', 'size']);
+  assert.strictEqual(view(master).characters[drago].hp.max, 200);
+  // nebbia: al giocatore arrivano solo i tasselli rivelati, i lati che li toccano, ciò che c'è sopra, e i segnalini rivelati o suoi
+  const mine = actions['char.create'](p, {}).id;
+  actions.maps(master, { maps: [{ id: 'f', visible: true, cols: 2, rows: 1, levels: [{ id: 'L', fog: { on: true, shown: { '0,0': 1 } },
+    tiles: { '0,0': {}, '1,0': {} }, edges: { '0,0,e': 2, '1,0,e': 5 }, objects: [{ type: 'barrel', x: 3, y: 3 }, { type: 'chest', x: 15, y: 3 }],
+    doors: [{ v: true, x: 10, y: 2, n: 2 }, { v: true, x: 20, y: 2, n: 2 }] }] }] });
+  actions.token(master, { map: 'f', char: drago, lv: 'L', x: 15, y: 5 });
+  actions.token(p, { map: 'f', char: mine, lv: 'L', x: 16, y: 5 });
+  const fl = view(p).maps[0].levels[0];
+  assert.deepStrictEqual([Object.keys(fl.tiles), Object.keys(fl.edges), fl.objects.map(o => o.type), fl.doors.map(d => d.x)], [['0,0'], ['0,0,e'], ['barrel'], [10]]);
+  assert.deepStrictEqual(Object.keys(view(p).maps[0].tokens), [mine]);
+  assert.strictEqual(Object.keys(view(master).maps[0].levels[0].tiles).length, 2);
   // classe e livello separati
   for (const [cls, want] of [['Ranger 6', ['Ranger', '6']], ['Guerriero 2/Mago 3', ['Guerriero 2/Mago 3', undefined]], ['Mago', ['Mago', undefined]]]) {
     const ch = { cls };
