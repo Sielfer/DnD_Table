@@ -1,6 +1,16 @@
 # Tavolo D&D 3.5
 
-Tavolo virtuale per la rete di casa: schede dei personaggi, tracker di iniziativa, dadi condivisi, handout. Non serve installare nulla.
+Tavolo virtuale per la rete di casa: schede dei personaggi, tracker di iniziativa, dadi condivisi, handout e mappe con nebbia di guerra. Non serve installare nulla.
+
+![La mappa vista dal master, con gli strumenti dell'editor](docs/img/mappa-master.png)
+
+| Scheda del personaggio | Combattimento (vista del master) |
+| --- | --- |
+| ![Scheda del personaggio](docs/img/scheda.png) | ![Tracker di iniziativa](docs/img/combattimento.png) |
+
+| La stessa mappa vista da un giocatore | Dal telefono |
+| --- | --- |
+| ![Mappa del giocatore con la nebbia di guerra](docs/img/mappa-giocatore.png) | ![Il tavolo sul telefono](docs/img/telefono.png) |
 
 ## Avvio
 
@@ -47,6 +57,7 @@ Il codice è in un repository git; `data.json` e `TavoloDnD.exe` restano fuori (
 - **Giocatori**: aprono l'indirizzo, scelgono nome + PIN (l'account si crea al primo accesso), creano e compilano la propria scheda. Le schede altrui si vedono in sola lettura.
 - **Master**: entra come `Master`; modifica tutte le schede, assegna una scheda a un giocatore, gestisce il combattimento (PNG nascosti, PF dei PNG visibili solo a lui), tira dadi segreti, scrive note private e pubblica handout.
 - **Campagne**: in alto il master sceglie la campagna in gioco (▶), ne crea di nuove o la rinomina. Ogni campagna ha le sue schede, il suo combattimento, il suo log dei dadi, i suoi handout e le sue note; gli account restano gli stessi in tutte le campagne. I giocatori possono sfogliare le altre campagne e aggiornare lì i propri personaggi; quando il master cambia la campagna in gioco, tutti tornano su quella.
+- **Mappe**: il master le disegna a tasselli di 15 m (fino a 40 per lato) con pennello, porte, finestre, scale, arredi e natura, anche su più piani (il piano sopra o sotto si può vedere in trasparenza). Le mostra ai giocatori quando vuole; i segnalini occupano lo spazio della taglia del personaggio, ognuno muove il suo. Le note con freccia e la **nebbia di guerra** si accendono e spengono dal master: ai giocatori arriva solo ciò che è stato rivelato. Scorciatoie: tasti 1–6 per gli strumenti, Ctrl+Z annulla, Ctrl+rotella zoom, clic destro cancella.
 - I tiri si fanno cliccando sui bonus in scheda (TS, abilità, attacchi, caratteristiche) o dal pannello Dadi. Li tira il server, tutti vedono il log.
 
 Tutto è salvato in `data.json` (fai una copia per il backup). Per ripartire da zero: ferma il server ed elimina `data.json`.
