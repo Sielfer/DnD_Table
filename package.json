@@ -1,9 +1,34 @@
 {
   "name": "tavolo-dnd35",
+  "productName": "Tavolo D&D 3.5",
+  "version": "0.0.3",
+  "description": "Tavolo virtuale D&D 3.5 per la rete di casa",
+  "author": "Jerwin Olar",
   "private": true,
+  "main": "electron/main.js",
   "scripts": {
-    "start": "node server.js",
-    "test": "node server.js --test && node test-mappe.js",
+    "ui": "node node_modules/vite/bin/vite.js build",
+    "dev": "node node_modules/vite/bin/vite.js",
+    "start": "npm run ui && node server.js",
+    "app": "npm run ui && node node_modules/electron/cli.js .",
+    "test": "node server.js --test && node test-mappe.mjs",
     "build": "node build.js"
+  },
+  "build": {
+    "appId": "it.tavolo.dnd35",
+    "productName": "TavoloDnD",
+    "files": ["server.js", "dist/index.html", "electron/**/*"],
+    "directories": { "output": "release" },
+    "win": { "target": "portable", "icon": "electron/icon.png" },
+    "portable": { "artifactName": "TavoloDnD.exe" }
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "6.2.1",
+    "electron": "45.2.3",
+    "electron-builder": "26.18.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "vite": "8.3.6",
+    "vite-plugin-singlefile": "2.3.4"
   }
 }

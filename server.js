@@ -6,19 +6,12 @@ const path = require('path');
 const crypto = require('crypto');
 const assert = require('assert');
 
-// Dentro TavoloDnD.exe la pagina è incorporata e data.json sta accanto all'exe.
-const sea = (() => { try { return require('node:sea'); } catch { return null; } })();
-const isExe = !!sea?.isSea();
-const DIR = isExe ? path.dirname(process.execPath) : __dirname;
+// Dentro TavoloDnD.exe (Electron) data.json sta accanto all'exe: la cartella arriva in TAVOLO_DIR.
+const DIR = process.env.TAVOLO_DIR || __dirname;
 const PORT = Number(process.env.PORT) || 3000;
 const DATA = path.join(DIR, 'data.json');
-const page = () => (isExe ? sea.getAsset('index.html', 'utf8') : fs.readFileSync(path.join(__dirname, 'index.html')));
-const openBrowser = () => {
-  if (process.env.NO_BROWSER) return;
-  const url = `http://localhost:${PORT}`;
-  const cmd = process.platform === 'win32' ? `start "" "${url}"` : process.platform === 'darwin' ? `open ${url}` : `xdg-open ${url}`;
-  require('child_process').exec(cmd);
-};
+// la pagina è l'interfaccia React compilata da Vite in un file solo (npm run ui)
+const page = () => fs.readFileSync(path.join(__dirname, 'dist', 'index.html'));
 
 const id = () => crypto.randomBytes(8).toString('hex');
 const fail = (msg, status = 400) => { throw Object.assign(new Error(msg), { status }); };
@@ -101,14 +94,19 @@ const checkPin = (pin, stored) => {
 const fails = {}; // PIN sbagliati per utente e dispositivo: dopo 10 blocco di 5 minuti
 
 let master = Object.values(db.users).find(u => u.role === 'master');
-if (!master || process.env.MASTER_PIN) {
-  const pin = process.env.MASTER_PIN || String(crypto.randomInt(1000, 10000));
+let newPin = null; // PIN del master appena creato: la finestra del tavolo lo mostra finché il master non entra
+function setMasterPin(pin = String(crypto.randomInt(1000, 10000))) {
   master ??= { id: id(), name: 'Master', role: 'master' };
   master.pin = hash(pin);
   db.users[master.id] = master;
+  // le sessioni aperte con il vecchio PIN non valgono più
+  for (const t of Object.keys(db.sessions)) if (db.sessions[t] === master.id) delete db.sessions[t];
+  newPin = pin;
   if (!TEST) console.log(`Account master: nome "${master.name}", PIN ${pin}`);
   flush();
+  return pin;
 }
+if (!master || process.env.MASTER_PIN) setMasterPin(process.env.MASTER_PIN || undefined);
 
 const sidOf = req => /(?:^|;\s*)sid=([a-f0-9]+)/.exec(req.headers.cookie || '')?.[1];
 // Login (al primo accesso crea l'account). Restituisce il token di sessione.
@@ -124,6 +122,7 @@ function login(name, pin, ip) {
     fail('PIN errato', 401);
   }
   if (u) delete fails[fk];
+  if (u?.role === 'master') newPin = null; // il master lo conosce: la finestra non lo mostra più
   if (!u) { u = { id: id(), name: n, role: 'player', pin: hash(pin) }; db.users[u.id] = u; }
   const token = crypto.randomBytes(24).toString('hex');
   db.sessions[token] = u.id;
@@ -156,11 +155,14 @@ function fogLevel(l) {
 // e i segnalini rivelati (i propri sempre).
 function playerMap(m, u, camp) {
   const lv = id => m.levels?.find(l => l.id === id);
-  const tokens = Object.fromEntries(Object.entries(m.tokens || {}).filter(([cid, t]) => camp.characters[cid]?.owner === u.id || !lv(t.lv) || fogOn(lv(t.lv), t.x, t.y)));
+  const tokens = Object.fromEntries(Object.entries(m.tokens || {}).filter(([cid, t]) => !camp.characters[cid]?.hidden
+    && (camp.characters[cid]?.owner === u.id || !lv(t.lv) || fogOn(lv(t.lv), t.x, t.y))));
   return { ...m, tokens, levels: m.levels?.map(l => ({ ...fogLevel(l), notes: (l.notes || []).filter(n => n.on) })) };
 }
-// Schede "solo master" (mostri, PNG): ai giocatori solo quanto basta per il segnalino.
-const playerChars = chars => Object.fromEntries(Object.entries(chars).map(([k, c]) => [k, c.secret ? { id: c.id, name: c.name, size: c.size, owner: c.owner, secret: true } : c]));
+// Ai giocatori: i personaggi nascosti dal master (mostri non ancora rivelati) non arrivano proprio;
+// delle schede "solo master" solo quanto basta per il segnalino.
+const playerChars = chars => Object.fromEntries(Object.entries(chars).filter(([, c]) => !c.hidden)
+  .map(([k, c]) => [k, c.secret ? { id: c.id, name: c.name, size: c.size, owner: c.owner, ...(c.avatar && { avatar: c.avatar }), secret: true } : c]));
 
 function view(u) {
   const isMaster = u.role === 'master';
@@ -175,13 +177,15 @@ function view(u) {
     tracker: isMaster ? t : {
       round: t.round,
       list: t.list.map((c, i) => ({ ...c, current: i === t.turn }))
-        .filter(c => !c.hidden)
+        .filter(c => !c.hidden && !camp.characters[c.charId]?.hidden)
         .map(c => (c.charId ? c : { name: c.name, init: c.init, cond: c.cond, current: c.current })),
     },
     rolls: isMaster ? camp.rolls : camp.rolls.filter(r => !r.secret),
-    handouts: isMaster ? camp.handouts : camp.handouts.filter(h => h.visible),
+    // handout: a tutti, oppure solo ai giocatori in "to"; agli altri non arriva proprio (e nessuno vede a chi altro è andato)
+    handouts: isMaster ? camp.handouts : camp.handouts.filter(h => h.visible && (!h.to?.length || h.to.includes(u.id))).map(({ to, ...h }) => ({ ...h, private: !!to?.length })),
     notes: isMaster ? camp.notes : undefined,
     story: camp.story ?? '',
+    recaps: camp.recaps ?? [],
     maps: isMaster ? camp.maps ?? [] : (camp.maps ?? []).filter(m => m.visible).map(m => playerMap(m, u, camp)),
   };
 }
@@ -208,8 +212,20 @@ const row = r => r && typeof r === 'object' && !Array.isArray(r) && Object.keys(
 const LISTS = ['attacks', 'skills'];
 // campi con dentro altri campi; tutto il resto della scheda è un valore semplice
 const NESTED = ['abil', 'hp', 'saves', 'ac', 'money', 'spells', ...LISTS];
-const validValue = (p, v) => (LISTS.includes(p[0]) && p.length === 1 ? Array.isArray(v) && v.length <= 1000 && v.every(row)
+// Avatar: un'immagine piccola già ridotta dalla pagina, come data URL. Solo questi formati, così nell'attributo src/href non entra altro.
+const AVATAR = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
+const validAvatar = v => v === null || v === '' || (typeof v === 'string' && v.length <= 150000 && AVATAR.test(v));
+const validValue = (p, v) => (p[0] === 'avatar' ? p.length === 1 && validAvatar(v)
+  : LISTS.includes(p[0]) && p.length === 1 ? Array.isArray(v) && v.length <= 1000 && v.every(row)
   : LISTS.includes(p[0]) && p.length === 2 ? row(v) : scalar(v));
+// Decide solo il master: "solo master" (statistiche nascoste), "nascosto" (i giocatori non lo vedono proprio), "npc" (mostro o PNG)
+const MASTER_FLAGS = ['secret', 'hidden', 'npc'];
+function myRecap(u, rid) {
+  const r = (C(u).recaps ?? []).find(x => x.id === rid);
+  if (!r) fail('Riepilogo inesistente', 404);
+  if (u.role !== 'master' && r.author !== u.id) fail('Non è un tuo riepilogo', 403);
+  return r;
+}
 const campaignName = n => String(n || '').trim().slice(0, 80) || fail('Nome campagna obbligatorio');
 const actions = {
   'campaign.create'(u, a) { needMaster(u); newCampaign(campaignName(a.name)); },
@@ -227,8 +243,10 @@ const actions = {
     const data = a.data && typeof a.data === 'object' && !Array.isArray(a.data) ? a.data : {};
     const cid = id();
     // tiene solo i campi validi (la pagina manda nome ed elenco delle abilità)
-    const ok = Object.fromEntries(Object.entries(data).filter(([k, v]) => !BAD_KEYS.includes(k) && !['secret', 'id', 'owner'].includes(k) && validValue([k], v)));
-    C(u).characters[cid] = { ...ok, id: cid, owner: u.id };
+    const ok = Object.fromEntries(Object.entries(data).filter(([k, v]) => !BAD_KEYS.includes(k) && !['id', 'owner', ...MASTER_FLAGS].includes(k) && validValue([k], v)));
+    // il master può creare direttamente un mostro o PNG nascosto
+    const flags = u.role === 'master' ? Object.fromEntries(MASTER_FLAGS.filter(k => data[k] === true).map(k => [k, true])) : {};
+    C(u).characters[cid] = { ...ok, ...flags, id: cid, owner: u.id };
     return { id: cid };
   },
   'char.set'(u, a) {
@@ -237,7 +255,7 @@ const actions = {
     if (!Array.isArray(p) || !p.length || ['id', 'owner'].includes(p[0]) || (p.length > 1 && !NESTED.includes(p[0]))
       || !p.every(k => (typeof k === 'string' || (Number.isInteger(k) && k >= 0 && k < 1000)) && !BAD_KEYS.includes(k))) fail('Campo non valido');
     if (!validValue(p, a.value)) fail('Valore non valido');
-    if (p[0] === 'secret') needMaster(u); // "solo master": la decide il master
+    if (MASTER_FLAGS.includes(p[0])) needMaster(u);
     let o = c;
     for (const k of p.slice(0, -1)) o = o[k] = o[k] && typeof o[k] === 'object' ? o[k] : {};
     o[p.at(-1)] = a.value;
@@ -269,6 +287,21 @@ const actions = {
   },
   notes(u, a) { needMaster(u); C().notes = String(a.notes ?? ''); },
   story(u, a) { needMaster(u); C().story = String(a.story ?? ''); },
+  // Riepiloghi sotto la storia: li scrive chiunque; ognuno modifica e cancella i suoi, il master tutti.
+  'recap.add'(u) {
+    const camp = C(u);
+    camp.recaps ??= [];
+    if (camp.recaps.length >= 500) fail('Troppi riepiloghi');
+    const r = { id: id(), title: `Riepilogo ${camp.recaps.length + 1}`, text: '', author: u.id, time: Date.now() };
+    camp.recaps.push(r);
+    return { id: r.id };
+  },
+  'recap.set'(u, a) {
+    const r = myRecap(u, a.id);
+    if (!['title', 'text'].includes(a.field)) fail('Campo non valido');
+    r[a.field] = String(a.value ?? '').slice(0, a.field === 'title' ? 200 : 50000);
+  },
+  'recap.delete'(u, a) { const r = myRecap(u, a.id), camp = C(u); camp.recaps = camp.recaps.filter(x => x !== r); },
   maps(u, a) {
     needMaster(u);
     if (!Array.isArray(a.maps) || !a.maps.every(m => m && typeof m === 'object')) fail('Mappe non valide');
@@ -316,6 +349,16 @@ if (TEST) {
   assert.strictEqual(v.notes, undefined);
   // la storia la leggono tutti, ma la scrive solo il master
   assert.throws(() => actions.story(p, { story: 'x' }));
+  // riepiloghi: il giocatore scrive il suo, non quello degli altri; il master li corregge tutti
+  const rp = actions['recap.add'](p).id, rm = actions['recap.add'](master).id;
+  actions['recap.set'](p, { id: rp, field: 'text', value: 'Abbiamo trovato la cripta' });
+  assert.throws(() => actions['recap.set'](p, { id: rm, field: 'text', value: 'x' }));
+  assert.throws(() => actions['recap.set'](p, { id: rp, field: 'author', value: 'x' }));
+  assert.throws(() => actions['recap.delete'](p, { id: rm }));
+  actions['recap.set'](master, { id: rp, field: 'title', value: 'Sessione 3' });
+  assert.deepStrictEqual(view(p).recaps.map(r => [r.title, r.text]), [['Sessione 3', 'Abbiamo trovato la cripta'], ['Riepilogo 2', '']]);
+  actions['recap.delete'](p, { id: rp });
+  assert.deepStrictEqual(view(p).recaps.map(r => r.id), [rm]);
   actions.story(master, { story: 'Inizio' });
   assert.strictEqual(view(p).story, 'Inizio');
   // mappe: i giocatori vedono solo quelle mostrate dal master
@@ -344,6 +387,13 @@ if (TEST) {
   actions['char.delete'](p, { id: own });
   actions['char.delete'](master, { id: other });
   assert.strictEqual(v.handouts.length, 0);
+  // handout privati: arrivano solo ai destinatari, che non vedono a chi altro è andato
+  login('Bea', '2222', 'pc');
+  const bea = Object.values(db.users).find(x => x.name === 'Bea');
+  actions.handouts(master, { handouts: [{ id: 'h1', title: 'A tutti', visible: true }, { id: 'h2', title: 'Solo Bea', visible: true, to: [bea.id] }, { id: 'h3', title: 'Bozza', visible: false, to: [p.id] }] });
+  assert.deepStrictEqual(view(p).handouts.map(h => h.title), ['A tutti']);
+  assert.deepStrictEqual(view(bea).handouts.map(h => [h.title, h.private, h.to]), [['A tutti', false, undefined], ['Solo Bea', true, undefined]]);
+  actions.handouts(master, { handouts: [] });
 
   // percorsi pericolosi in char.set
   const cid = actions['char.create'](p, {}).id;
@@ -374,6 +424,22 @@ if (TEST) {
   assert.deepStrictEqual([Object.keys(fl.tiles), Object.keys(fl.edges), fl.objects.map(o => o.type), fl.doors.map(d => d.x)], [['0,0'], ['0,0,e'], ['barrel'], [10]]);
   assert.deepStrictEqual(Object.keys(view(p).maps[0].tokens), [mine]);
   assert.strictEqual(Object.keys(view(master).maps[0].levels[0].tiles).length, 2);
+  // mostri nascosti: il master li crea e li mette in mappa; i giocatori non ne sanno nulla finché lui non li mostra
+  const orco = actions['char.create'](master, { data: { name: 'Orco', npc: true, hidden: true, secret: true } }).id;
+  assert.strictEqual(actions['char.create'](p, { data: { name: 'Furbo', hidden: true } }) && Object.values(C(p).characters).some(c => c.hidden && c.owner === p.id), false);
+  assert.throws(() => actions['char.set'](p, { id: mine, path: ['hidden'], value: true }));
+  actions.maps(master, { maps: [{ id: 'f', visible: true, cols: 2, rows: 1, levels: [{ id: 'L', tiles: {} }] }] });
+  actions.token(master, { map: 'f', char: orco, lv: 'L', x: 1, y: 1 });
+  actions.tracker(master, { tracker: { round: 1, turn: 0, list: [{ charId: orco, init: 5 }, { charId: mine, init: 3 }] } });
+  const hiddenNow = () => [orco in view(p).characters, orco in view(p).maps[0].tokens, view(p).tracker.list.length];
+  assert.deepStrictEqual(hiddenNow(), [false, false, 1]);
+  actions['char.set'](master, { id: orco, path: ['hidden'], value: false });
+  assert.deepStrictEqual(hiddenNow(), [true, true, 2]);
+  // avatar: solo immagini piccole in data URL
+  actions['char.set'](p, { id: mine, path: ['avatar'], value: 'data:image/webp;base64,AAAA' });
+  for (const bad of ['data:image/svg+xml;base64,AAAA', 'data:image/png;base64,AA"onerror="x', 'http://x/y.png', 'data:image/png;base64,' + 'A'.repeat(150000)]) {
+    assert.throws(() => actions['char.set'](p, { id: mine, path: ['avatar'], value: bad }), bad.slice(0, 30));
+  }
   // classe e livello separati
   for (const [cls, want] of [['Ranger 6', ['Ranger', '6']], ['Guerriero 2/Mago 3', ['Guerriero 2/Mago 3', undefined]], ['Mago', ['Mago', undefined]]]) {
     const ch = { cls };
@@ -389,6 +455,12 @@ if (TEST) {
   for (let i = 0; i < 6; i++) login('Luca', '1111', 'telefono');
   const luca = Object.values(db.users).find(x => x.name === 'Luca');
   assert.strictEqual(Object.values(db.sessions).filter(s => s === luca.id).length, 5);
+
+  // nuovo PIN del master: la finestra lo mostra finché il master non entra; le sessioni col PIN vecchio non valgono più
+  const mtok = login('Master', setMasterPin(), 'pc');
+  assert.strictEqual(newPin, null);
+  setMasterPin('5555');
+  assert.deepStrictEqual([newPin, db.sessions[mtok], db.sessions[Object.keys(db.sessions).find(t => db.sessions[t] === luca.id)]], ['5555', undefined, luca.id]);
   console.log('ok');
   process.exit(0);
 }
@@ -409,7 +481,13 @@ const body = req => new Promise((resolve, reject) => {
   });
 });
 
-http.createServer(async (req, res) => {
+// Indirizzi del PC sulla rete di casa. Prima quelli buoni per i giocatori; in fondo le schede virtuali (WSL, VirtualBox, VPN),
+// che da un telefono non si raggiungono. shortcut: si riconoscono dal nome e da 192.168.56.x (VirtualBox), può sbagliare su reti strane.
+const VIRTUAL = /vethernet|virtual|vmware|wsl|hyper-v|tailscale|zerotier|vpn|docker/i;
+const lanIps = () => Object.entries(os.networkInterfaces())
+  .flatMap(([name, list]) => list.filter(i => i.family === 'IPv4' && !i.internal).map(i => ({ ip: i.address, other: VIRTUAL.test(name) || /^192\.168\.56\./.test(i.address) || !/^(192\.168|10)\./.test(i.address) })))
+  .sort((a, b) => a.other - b.other);
+const server = http.createServer(async (req, res) => {
   try {
     const { pathname } = new URL(req.url, 'http://x');
     if (req.method === 'GET' && pathname === '/') {
@@ -418,6 +496,16 @@ http.createServer(async (req, res) => {
     }
     // Il controllo sul content-type blocca i form di altri siti (CSRF) insieme a SameSite.
     if (req.method === 'POST' && !String(req.headers['content-type']).startsWith('application/json')) fail('Content-Type non valido');
+
+    // Solo dal PC che ospita il tavolo (la finestra dell'app): indirizzi per i giocatori e PIN del master.
+    // Anche il nome nella richiesta deve essere locale: una pagina esterna non può leggerlo cambiando DNS.
+    if (pathname.startsWith('/api/host')) {
+      const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress)
+        && /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(req.headers.host || '');
+      if (!local) fail('Solo dal PC del tavolo', 403);
+      if (req.method === 'GET' && pathname === '/api/host') return json(res, 200, { port: PORT, ips: lanIps(), pin: newPin });
+      if (req.method === 'POST' && pathname === '/api/host/pin') { const pin = setMasterPin(); broadcast(); return json(res, 200, { pin }); }
+    }
 
     if (req.method === 'POST' && pathname === '/api/login') {
       const { name, pin } = await body(req);
@@ -454,16 +542,16 @@ http.createServer(async (req, res) => {
   } catch (e) {
     if (!res.headersSent) json(res, e.status || 400, { error: e.message });
   }
-}).on('error', e => {
-  if (e.code !== 'EADDRINUSE') throw e;
-  // doppio clic con il tavolo già acceso: apri solo il browser
-  console.log(`Il tavolo è già acceso sulla porta ${PORT}.`);
-  openBrowser();
-  setTimeout(() => process.exit(0), 1500);
-}).listen(PORT, '0.0.0.0', () => {
-  const ips = Object.values(os.networkInterfaces()).flat().filter(i => i.family === 'IPv4' && !i.internal).map(i => i.address);
-  console.log(`Tavolo pronto. Sul tuo PC: http://localhost:${PORT}`);
-  for (const ip of ips) console.log(`Per i giocatori sulla stessa rete: http://${ip}:${PORT}`);
-  if (isExe) console.log('Lascia aperta questa finestra durante la partita: chiudendola il tavolo si spegne.');
-  if (isExe) openBrowser();
 });
+
+// Accende il tavolo su tutta la rete di casa. Rifiuta se la porta è occupata (per esempio da un altro programma).
+const start = () => new Promise((resolve, reject) => server.once('error', reject).listen(PORT, '0.0.0.0', () => resolve(PORT)));
+module.exports = { start, flush, PORT };
+
+// "npm start": il tavolo senza finestra, si apre dal browser
+if (require.main === module) {
+  start().then(() => {
+    console.log(`Tavolo pronto. Sul tuo PC: http://localhost:${PORT}`);
+    for (const { ip } of lanIps()) console.log(`Per i giocatori sulla stessa rete: http://${ip}:${PORT}`);
+  }, e => { console.error(e.code === 'EADDRINUSE' ? `La porta ${PORT} è già occupata: il tavolo è già acceso?` : e.message); process.exit(1); });
+}

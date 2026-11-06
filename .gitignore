@@ -7,3 +7,7 @@ TavoloDnD
 sea-prep.blob
 sea-config.json
 node_modules/
+
+# Interfaccia compilata e exe di Electron: si ricreano con npm run build
+dist/
+release/
