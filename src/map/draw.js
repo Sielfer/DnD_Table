@@ -6,8 +6,10 @@ import {
 
 // Texture dei materiali (si ripetono su tutta la mappa senza giunture tra i tasselli). Vanno una volta nella pagina.
 export const TEXTURES = `<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
-  <!-- griglia: linea scura su una fascia grigia chiara, così si vede sia sui pavimenti chiari sia sulla roccia scura -->
-  <pattern id="mapgrid" width="1" height="1" patternUnits="userSpaceOnUse"><path d="M1 0H0V1" fill="none" stroke="#c8c8c8" stroke-width=".09"/><path d="M1 0H0V1" fill="none" stroke="#1a1a1a" stroke-width=".035"/></pattern>
+  <!-- griglia: linea scura su una fascia chiara più larga, così si vede sui pavimenti chiari, sulla roccia scura e anche
+       sul pavimento a mattoni, dove cade proprio sulle fughe scure. Ogni quadretto disegna i suoi quattro lati: metà
+       della linea per parte, così è centrata sul bordo e larga per intero. -->
+  <pattern id="mapgrid" width="1" height="1" patternUnits="userSpaceOnUse"><path d="M0 0H1V1H0Z" fill="none" stroke="#f4f1ea" stroke-width=".16"/><path d="M0 0H1V1H0Z" fill="none" stroke="#111" stroke-width=".06"/></pattern>
   <pattern id="tex-roccia" width="3" height="3" patternUnits="userSpaceOnUse">
     <rect width="3" height="3" fill="#2d2a27"/>
     <path d="M.2 .4l.6-.3.5.4-.2.6-.7.1zM1.9 1.6l.7-.2.3.6-.5.5-.6-.3zM.6 2.2l.5.1.1.5-.6.1z" fill="#252220"/>
