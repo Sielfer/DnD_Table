@@ -116,6 +116,7 @@ function login(name, pin, ip) {
   let u = Object.values(db.users).find(x => x.name.toLowerCase() === n.toLowerCase());
   const fk = u && u.id + ip; // anche per dispositivo: un giocatore non può tenere fuori il master
   if (u && fails[fk]?.until > Date.now()) fail('Troppi tentativi: riprova tra qualche minuto', 429);
+  if (u && !u.pin) u.pin = hash(pin); // account tornato da un backup (che non contiene i PIN): il primo che entra sceglie il PIN
   if (u && !checkPin(pin, u.pin)) {
     const f = fails[fk] = { n: (fails[fk]?.n || 0) + 1, until: 0 };
     if (f.n >= 10) Object.assign(f, { n: 0, until: Date.now() + 5 * 60e3 });
@@ -323,6 +324,85 @@ const actions = {
   },
 };
 
+// --- Backup delle campagne ---
+// Il file contiene tutte le campagne, segreti del master compresi, e gli account (senza PIN né accessi):
+// chiunque può scaricarlo, così una copia c'è anche se il PC del tavolo si rompe. Ripristinarlo può solo il master.
+const BACKUP = 'tavolo-dnd35-backup';
+const backupOf = u => ({
+  app: BACKUP, version: 1, time: Date.now(), by: u.name,
+  users: Object.values(db.users).map(({ id, name, role }) => ({ id, name, role })),
+  campaigns: Object.values(db.campaigns),
+});
+const safeId = v => typeof v === 'string' && /^[\w-]{1,64}$/.test(v) && !BAD_KEYS.includes(v);
+const plain = v => v && typeof v === 'object' && !Array.isArray(v);
+// Controlla il file e rimette in forma ogni campagna (i campi mancanti tornano vuoti, come in una campagna nuova).
+function readBackup(b) {
+  if (!plain(b) || b.app !== BACKUP || !Array.isArray(b.campaigns)) fail('Non è un file di backup del tavolo');
+  const camps = b.campaigns.map(c => {
+    if (!plain(c) || !safeId(c.id) || !plain(c.characters ?? {})) fail('Backup rovinato: una campagna non si legge');
+    const arr = k => (Array.isArray(c[k]) ? c[k] : []);
+    const t = plain(c.tracker) && Array.isArray(c.tracker.list) ? c.tracker : { round: 1, turn: 0, list: [] };
+    const chars = Object.fromEntries(Object.entries(c.characters ?? {}).filter(([k, ch]) => safeId(k) && plain(ch)));
+    return { ...c, name: String(c.name || 'Campagna').slice(0, 80), characters: chars, tracker: t, rolls: arr('rolls'), handouts: arr('handouts'),
+      maps: arr('maps'), recaps: arr('recaps'), notes: String(c.notes ?? ''), story: String(c.story ?? '') };
+  });
+  if (new Set(camps.map(c => c.id)).size !== camps.length) fail('Backup rovinato: campagne doppie');
+  const users = (Array.isArray(b.users) ? b.users : []).filter(x => plain(x) && safeId(x.id) && typeof x.name === 'string' && x.name.trim());
+  return { camps, users, time: Number(b.time) || null, by: String(b.by || '') };
+}
+const counts = c => ({ characters: Object.keys(c.characters).length, maps: (c.maps ?? []).length, recaps: (c.recaps ?? []).length });
+// Cosa c'è nel file e cosa c'è già sul tavolo: la stessa campagna ha lo stesso id anche se nel frattempo è stata rinominata.
+function restorePreview(b) {
+  const { camps, time, by } = readBackup(b);
+  return {
+    time, by,
+    campaigns: camps.map(c => {
+      const cur = Object.hasOwn(db.campaigns, c.id) && db.campaigns[c.id];
+      return { id: c.id, name: c.name, counts: counts(c), exists: !!cur, ...(cur && { current: { name: cur.name, counts: counts(cur), live: db.active === c.id } }) };
+    }),
+  };
+}
+// Gli account del backup: lo stesso id se c'è già, altrimenti lo stesso nome; il master del backup è il master di adesso.
+// Chi manca torna senza PIN: lo sceglie al primo accesso.
+function restoreUsers(users) {
+  const map = {};
+  for (const x of users) {
+    const same = Object.hasOwn(db.users, x.id) && db.users[x.id];
+    const byName = Object.values(db.users).find(y => y.name.toLowerCase() === x.name.trim().toLowerCase());
+    if (x.role === 'master') map[x.id] = master.id;
+    else if (same || byName) map[x.id] = (same || byName).id;
+    else { const nu = { id: x.id, name: x.name.trim().slice(0, 40), role: 'player' }; db.users[nu.id] = nu; map[x.id] = nu.id; }
+  }
+  return map;
+}
+// choices: { id campagna: 'overwrite' (stessa campagna: sostituisce), 'copy' (stessa campagna: accanto, con un id nuovo), 'add' (campagna nuova) }.
+// Le campagne non nominate restano come sono.
+function restoreApply(b, choices) {
+  const { camps, users } = readBackup(b);
+  if (!plain(choices)) fail('Scelte non valide');
+  const todo = camps.filter(c => Object.hasOwn(choices, c.id) && choices[c.id] !== 'skip');
+  for (const c of todo) {
+    const ch = choices[c.id], exists = Object.hasOwn(db.campaigns, c.id);
+    if (!(exists ? ['overwrite', 'copy'] : ['add']).includes(ch)) fail(`Scelta non valida per "${c.name}"`);
+  }
+  if (!todo.length) fail('Nessuna campagna da ripristinare');
+  // prima di sovrascrivere, una copia dei dati di adesso accanto a data.json
+  if (!TEST && todo.some(c => choices[c.id] === 'overwrite')) fs.writeFileSync(path.join(DIR, 'data-prima-del-ripristino.json'), JSON.stringify(db));
+  const um = restoreUsers(users), uid = x => um[x] ?? x;
+  const done = { overwrite: 0, copy: 0, add: 0 };
+  for (const c of todo) {
+    for (const k of Object.keys(c.characters)) c.characters[k].owner = uid(c.characters[k].owner);
+    c.handouts = c.handouts.map(h => (plain(h) && Array.isArray(h.to) ? { ...h, to: h.to.map(uid) } : h));
+    c.recaps = c.recaps.map(r => (plain(r) ? { ...r, author: uid(r.author) } : r));
+    const ch = choices[c.id];
+    if (ch === 'copy') { c.id = id(); c.name = `${c.name} (backup)`.slice(0, 80); }
+    db.campaigns[c.id] = c;
+    done[ch]++;
+  }
+  flush();
+  return done;
+}
+
 if (TEST) {
   assert.strictEqual(roll('5').total, 5);
   assert.strictEqual(roll('2+3-1').total, 4);
@@ -461,6 +541,36 @@ if (TEST) {
   assert.strictEqual(newPin, null);
   setMasterPin('5555');
   assert.deepStrictEqual([newPin, db.sessions[mtok], db.sessions[Object.keys(db.sessions).find(t => db.sessions[t] === luca.id)]], ['5555', undefined, luca.id]);
+
+  // backup: stessa campagna (stesso id) da sovrascrivere o copiare, campagna diversa da aggiungere, account ritrovati
+  const bk = JSON.parse(JSON.stringify(backupOf(p)));
+  const cur = C(master), curId = cur.id, nChars = Object.keys(cur.characters).length;
+  assert(bk.campaigns.length >= 1 && bk.users.every(x => !('pin' in x)));
+  cur.story = 'cambiata dopo il backup';
+  const other2 = { ...structuredClone(bk.campaigns[0]), id: 'c0ffee', name: 'Altra campagna', characters: { k1: { id: 'k1', name: 'Nuovo', owner: 'sconosciuto' } } };
+  bk.campaigns.push(other2);
+  bk.users.push({ id: 'sconosciuto', name: 'Gianni', role: 'player' }, { id: 'mvecchio', name: 'Master', role: 'master' });
+  other2.handouts = [{ id: 'h', to: ['mvecchio'] }];
+  const pv = restorePreview(bk);
+  assert.deepStrictEqual(pv.campaigns.map(c => [c.id, c.exists]), [[curId, true], ['c0ffee', false]]);
+  assert.strictEqual(pv.campaigns[0].current.counts.characters, nChars);
+  for (const bad of [{}, { app: 'x', campaigns: [] }, { app: BACKUP, campaigns: [{ id: '__proto__' }] }, { app: BACKUP, campaigns: [{ id: 'a' }, { id: 'a' }] }]) {
+    assert.throws(() => restorePreview(bad), JSON.stringify(bad));
+  }
+  assert.throws(() => restoreApply(bk, { [curId]: 'add' })); // la stessa campagna non si "aggiunge": si sovrascrive o si copia
+  assert.throws(() => restoreApply(bk, { c0ffee: 'overwrite' }));
+  assert.throws(() => restoreApply(bk, {}));
+  const before = Object.keys(db.campaigns).length;
+  assert.deepStrictEqual(restoreApply(bk, { [curId]: 'overwrite', c0ffee: 'add' }), { overwrite: 1, copy: 0, add: 1 });
+  assert.strictEqual(db.campaigns[curId].story, 'Inizio');
+  assert.strictEqual(Object.keys(db.campaigns).length, before + 1);
+  const gianni = Object.values(db.users).find(x => x.name === 'Gianni');
+  assert.deepStrictEqual([gianni.pin, db.campaigns.c0ffee.characters.k1.owner, db.campaigns.c0ffee.handouts[0].to[0]], [undefined, gianni.id, master.id]);
+  restoreApply(bk, { [curId]: 'copy' });
+  assert.strictEqual(Object.keys(db.campaigns).length, before + 2);
+  // l'account tornato dal backup sceglie il PIN al primo accesso, poi vale quello
+  login('Gianni', '4321', 'pc');
+  assert.strictEqual(status(() => login('Gianni', '0000', 'pc')), 401);
   console.log('ok');
   process.exit(0);
 }
@@ -470,9 +580,9 @@ const json = (res, status, obj, headers = {}) => {
   res.writeHead(status, { 'content-type': 'application/json', ...headers });
   res.end(JSON.stringify(obj));
 };
-const body = req => new Promise((resolve, reject) => {
+const body = (req, max = 8e6) => new Promise((resolve, reject) => {
   let s = '';
-  req.on('data', d => { s += d; if (s.length > 8e6) { reject(Object.assign(new Error('Richiesta troppo grande'), { status: 413 })); req.destroy(); } });
+  req.on('data', d => { s += d; if (s.length > max) { reject(Object.assign(new Error('Richiesta troppo grande'), { status: 413 })); req.destroy(); } });
   req.on('end', () => {
     try {
       const v = JSON.parse(s);
@@ -530,6 +640,20 @@ const server = http.createServer(async (req, res) => {
       delete db.sessions[sidOf(req)];
       save();
       return json(res, 200, { ok: true }, { 'set-cookie': 'sid=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' });
+    }
+    if (req.method === 'GET' && pathname === '/api/backup') {
+      const day = new Date().toISOString().slice(0, 10);
+      res.writeHead(200, { 'content-type': 'application/json', 'content-disposition': `attachment; filename="tavolo-backup-${day}.json"`, 'cache-control': 'no-store' });
+      return res.end(JSON.stringify(backupOf(user)));
+    }
+    // ripristino: senza "choices" dice solo cosa c'è nel file; con "choices" lo applica
+    if (req.method === 'POST' && pathname === '/api/restore') {
+      needMaster(user);
+      const { backup, choices } = await body(req, 200e6);
+      if (!choices) return json(res, 200, restorePreview(backup));
+      const done = restoreApply(backup, choices);
+      broadcast();
+      return json(res, 200, { ok: true, done });
     }
     if (req.method === 'POST' && pathname === '/api/action') {
       const a = await body(req);

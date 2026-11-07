@@ -207,6 +207,19 @@ tr.cur > td:first-child { box-shadow: inset 3px 0 var(--gold); color: var(--gold
 .modal h3 { margin: 0 0 12px; font-size: 16px; }
 .modal .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
 .pop { position: absolute; z-index: 60; right: 0; top: calc(100% + 8px); width: 360px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow-lg); }
+/* --- Backup --- */
+a.btn { display: inline-block; padding: 7px 14px; border-radius: 9px; font-weight: 500; text-decoration: none; }
+a.btn.primary { background: var(--accent); color: var(--accent-ink); }
+a.btn.primary:hover { filter: brightness(1.08); }
+a.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.modal.restore { width: min(560px, 100%); max-height: calc(100vh - 32px); overflow: auto; }
+.restorelist { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.restorelist li { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--field); }
+.restorelist select { margin-top: 4px; }
+.small { font-size: 12px; }
+.badge { display: inline-block; margin-left: 4px; padding: 1px 7px; border-radius: 99px; font-size: 11px; font-weight: 600; vertical-align: 1px; }
+.badge.same { background: color-mix(in srgb, var(--gold) 18%, transparent); color: var(--gold); }
+.badge.new { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
 @keyframes fade { from { opacity: 0; } }
 .notice {
   position: fixed; z-index: 110; left: 50%; top: 16px; transform: translateX(-50%); max-width: calc(100% - 32px);

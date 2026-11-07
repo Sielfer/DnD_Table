@@ -7,6 +7,7 @@ import Sheets from './Sheets.jsx';
 import Combat from './Combat.jsx';
 import { Handouts, Story } from './Texts.jsx';
 import Maps from './Maps.jsx';
+import Backup from './Backup.jsx';
 
 const TABS = [['sheets', '📜', 'Schede'], ['combat', '⚔️', 'Combattimento'], ['handouts', '📨', 'Handout'], ['story', '📖', 'Storia'], ['maps', '🗺️', 'Mappe']];
 
@@ -103,6 +104,7 @@ function Header({ S, host, reloadHost }) {
           {hostOpen && <div className="pop"><HostInfo host={host} reload={reloadHost} /></div>}
         </span>
       )}
+      <Backup master={master} />
       <span className="who"><Avatar c={S.me} /><span className="name">{S.me.name}</span><small>({master ? 'master' : 'giocatore'})</small></span>
       <button onClick={out}>Esci</button>
     </header>
