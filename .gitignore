@@ -11,3 +11,9 @@ node_modules/
 # Interfaccia compilata e exe di Electron: si ricreano con npm run build
 dist/
 release/
+
+# App Android: strumenti scaricati, file intermedi, chiave di firma e apk si ricreano con android/build.sh
+android/.tools/
+android/.build/
+android/tavolo.keystore
+android/TavoloDnD.apk

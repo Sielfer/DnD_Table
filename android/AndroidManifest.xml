@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- App Android del tavolo: una finestra sul tavolo acceso sul PC di casa (come il browser, ma a tutto schermo). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="it.tavolo.dnd35">
+  <uses-permission android:name="android.permission.INTERNET" />
+  <!-- solo Android 9 e precedenti: serve per salvare il backup in Download -->
+  <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+  <application android:label="Tavolo D&amp;D" android:icon="@mipmap/ic_launcher" android:usesCleartextTraffic="true"
+      android:allowBackup="false" android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+    <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask"
+        android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|keyboard|uiMode|density"
+        android:windowSoftInputMode="adjustResize">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+      </intent-filter>
+    </activity>
+  </application>
+</manifest>

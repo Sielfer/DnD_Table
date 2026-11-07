@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tavolo D&amp;D</title>
+<style>
+  :root { color-scheme: dark; --bg: #0d0f15; --panel: #151821; --field: #1c202b; --ink: #e8eaf2; --muted: #8c92a8; --line: #262a37; --accent: #9b85ff; --accent-2: #d07bff; --danger: #ff6b6e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, sans-serif; }
+  .card { width: min(420px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 22px; }
+  h1 { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; font-size: 19px; }
+  .logo { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 11px; font-size: 11px; font-weight: 800; color: #fff; background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+  label { display: block; margin-bottom: 6px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  input { width: 100%; padding: 12px; font: inherit; color: var(--ink); background: var(--field); border: 1px solid var(--line); border-radius: 10px; }
+  input:focus { outline: none; border-color: var(--accent); }
+  button { width: 100%; margin-top: 14px; padding: 12px; font: inherit; font-weight: 600; color: #120d24; background: var(--accent); border: 0; border-radius: 10px; }
+  p { color: var(--muted); font-size: 13px; }
+  .err { color: var(--danger); }
+</style></head>
+<body>
+<form class="card" id="f">
+  <h1><span class="logo">d20</span>Tavolo D&amp;D 3.5</h1>
+  <p class="err" id="err" hidden></p>
+  <label for="url">Indirizzo del tavolo</label>
+  <input id="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="192.168.1.10:3000" required>
+  <button>Entra</button>
+  <p>Lo trovi sul PC del tavolo, in alto: <b>📡 Giocatori</b>. Il telefono deve essere sulla stessa rete Wi-Fi del PC.</p>
+</form>
+<script>
+  const st = JSON.parse(window.Tavolo ? Tavolo.state() : '{}');
+  const url = document.getElementById('url'), err = document.getElementById('err');
+  url.value = (st.url || '').replace(/^http:\/\//, '');
+  if (st.error) { err.textContent = st.error; err.hidden = false; }
+  document.getElementById('f').onsubmit = e => { e.preventDefault(); Tavolo.open(url.value); };
+</script>
+</body></html>

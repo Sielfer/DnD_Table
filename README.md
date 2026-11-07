@@ -71,6 +71,10 @@ Il codice è in un repository git; `data.json` e `TavoloDnD.exe` restano fuori (
 - **Per prendere le modifiche fatte altrove**: chiudi il tavolo e fai doppio clic su `aggiorna.cmd` (scarica e ricrea l'exe).
 - **Per spostare anche le partite**: copia a mano `data.json` accanto all'exe sull'altro PC.
 
+## App Android
+
+`bash android/build.sh` crea `android/TavoloDnD.apk` (serve solo Java; gli strumenti si scaricano da Maven Central). È una finestra sul tavolo acceso sul PC: al primo avvio chiede l'indirizzo che si vede in **📡 Giocatori**, poi si apre da sola. Funziona da Android 8 in su; per installarla bisogna consentire le app da origini sconosciute. Indietro, dalla prima pagina del tavolo, torna alla schermata dell'indirizzo. La chiave di firma resta in `android/tavolo.keystore` (fuori da git): con la stessa chiave l'app si aggiorna; con una chiave nuova va prima disinstallata.
+
 ## Uso
 
 - **Giocatori**: aprono l'indirizzo, scelgono nome + PIN (l'account si crea al primo accesso), creano e compilano la propria scheda. Le schede altrui si vedono in sola lettura.
