@@ -11,7 +11,7 @@
     "dev": "node node_modules/vite/bin/vite.js",
     "start": "npm run ui && node server.js",
     "app": "npm run ui && node node_modules/electron/cli.js .",
-    "test": "node server.js --test && node test-mappe.mjs",
+    "test": "node server.js --test && node test-mappe.mjs && node test-regole.mjs",
     "build": "node build.js"
   },
   "build": {

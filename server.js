@@ -61,7 +61,14 @@ function splitClassLevel(ch) {
   const m = ch.level === undefined && /^([^\d]+?)\s*(\d+)$/.exec(ch.cls || '');
   if (m) { ch.cls = m[1]; ch.level = m[2]; }
 }
-for (const camp of Object.values(db.campaigns)) Object.values(camp.characters).forEach(splitClassLevel);
+// Talenti, capacità speciali ed equipaggiamento erano un testo: ogni riga diventa uno slot (a cui ora si possono dare modificatori).
+function migrateChar(ch) {
+  splitClassLevel(ch);
+  for (const k of ['feats', 'gear', 'special']) {
+    if (typeof ch[k] === 'string') ch[k] = ch[k].split('\n').map(x => x.replace(/^\s*[-•*]\s*/, '').trim()).filter(Boolean).map(name => ({ name }));
+  }
+}
+for (const camp of Object.values(db.campaigns)) Object.values(camp.characters).forEach(migrateChar);
 if (!db.campaigns[db.active]) Object.keys(db.campaigns).length ? db.active = Object.keys(db.campaigns)[0] : newCampaign('Campagna 1');
 // db.active è la campagna in gioco, scelta dal master. Un giocatore può sfogliarne un'altra (u.campaign),
 // altrimenti segue quella in gioco.
@@ -209,8 +216,10 @@ function canEdit(u, cid) {
 // Valori delle schede: la pagina scrive solo testo, numeri e sì/no; le liste (attacchi, abilità) sono righe di questi.
 // Così nessuno può mandare dati che fanno andare in errore la pagina degli altri.
 const scalar = v => v === null || typeof v === 'boolean' || Number.isFinite(v) || (typeof v === 'string' && v.length <= 20000);
-const row = r => r && typeof r === 'object' && !Array.isArray(r) && Object.keys(r).length <= 50 && Object.values(r).every(scalar);
-const LISTS = ['attacks', 'skills'];
+const flat = r => r && typeof r === 'object' && !Array.isArray(r) && Object.keys(r).length <= 50 && Object.values(r).every(scalar);
+// talenti e oggetti hanno in più l'elenco dei loro modificatori: righe semplici anche queste
+const row = r => flat(r && !Array.isArray(r) && { ...r, mods: null }) && (r.mods === undefined || (Array.isArray(r.mods) && r.mods.length <= 20 && r.mods.every(flat)));
+const LISTS = ['attacks', 'skills', 'feats', 'gear', 'special'];
 // campi con dentro altri campi; tutto il resto della scheda è un valore semplice
 const NESTED = ['abil', 'hp', 'saves', 'ac', 'money', 'spells', ...LISTS];
 // Avatar: un'immagine piccola già ridotta dalla pagina, come data URL. Solo questi formati, così nell'attributo src/href non entra altro.
@@ -218,7 +227,8 @@ const AVATAR = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
 const validAvatar = v => v === null || v === '' || (typeof v === 'string' && v.length <= 150000 && AVATAR.test(v));
 const validValue = (p, v) => (p[0] === 'avatar' ? p.length === 1 && validAvatar(v)
   : LISTS.includes(p[0]) && p.length === 1 ? Array.isArray(v) && v.length <= 1000 && v.every(row)
-  : LISTS.includes(p[0]) && p.length === 2 ? row(v) : scalar(v));
+  : LISTS.includes(p[0]) && p.length === 2 ? row(v)
+  : LISTS.includes(p[0]) && p[2] === 'mods' ? p.length === 5 && scalar(v) : scalar(v));
 // Decide solo il master: "solo master" (statistiche nascoste), "nascosto" (i giocatori non lo vedono proprio), "npc" (mostro o PNG)
 const MASTER_FLAGS = ['secret', 'hidden', 'npc'];
 function myRecap(u, rid) {
@@ -257,6 +267,12 @@ const actions = {
       || !p.every(k => (typeof k === 'string' || (Number.isInteger(k) && k >= 0 && k < 1000)) && !BAD_KEYS.includes(k))) fail('Campo non valido');
     if (!validValue(p, a.value)) fail('Valore non valido');
     if (MASTER_FLAGS.includes(p[0])) needMaster(u);
+    // nelle liste un indice punta a una riga che c'è (o alla prossima, per aggiungerla): niente buchi che rompono la pagina
+    let w = c;
+    for (const [i, k] of p.entries()) {
+      if (LISTS.includes(p[0]) && Number.isInteger(k) && !(Array.isArray(w) && k <= w.length - (i < p.length - 1 ? 1 : 0))) fail('Riga inesistente');
+      w = w?.[k];
+    }
     let o = c;
     for (const k of p.slice(0, -1)) o = o[k] = o[k] && typeof o[k] === 'object' ? o[k] : {};
     o[p.at(-1)] = a.value;
@@ -391,7 +407,7 @@ function restoreApply(b, choices) {
   const um = restoreUsers(users), uid = x => um[x] ?? x;
   const done = { overwrite: 0, copy: 0, add: 0 };
   for (const c of todo) {
-    for (const k of Object.keys(c.characters)) c.characters[k].owner = uid(c.characters[k].owner);
+    for (const k of Object.keys(c.characters)) { c.characters[k].owner = uid(c.characters[k].owner); migrateChar(c.characters[k]); }
     c.handouts = c.handouts.map(h => (plain(h) && Array.isArray(h.to) ? { ...h, to: h.to.map(uid) } : h));
     c.recaps = c.recaps.map(r => (plain(r) ? { ...r, author: uid(r.author) } : r));
     const ch = choices[c.id];
@@ -477,6 +493,7 @@ if (TEST) {
 
   // percorsi pericolosi in char.set
   const cid = actions['char.create'](p, {}).id;
+  actions['char.set'](p, { id: cid, path: ['attacks'], value: [{}] });
   actions['char.set'](p, { id: cid, path: ['attacks', 0, 'name'], value: 'Ascia' });
   for (const path of [['attacks', 1e9, 'name'], ['attacks', -1], ['__proto__', 'x'], ['owner'], ['name', 'x'], ['secret']]) {
     assert.throws(() => actions['char.set'](p, { id: cid, path, value: 1 }), String(path));
@@ -486,6 +503,21 @@ if (TEST) {
     assert.throws(() => actions['char.set'](p, { id: cid, path, value }), JSON.stringify(path));
   }
   actions['char.set'](p, { id: cid, path: ['skills'], value: [{ name: 'Nuotare', ab: 'str', acp: true }] });
+  // talenti e oggetti con modificatori; nelle liste niente buchi
+  actions['char.set'](p, { id: cid, path: ['feats'], value: [{ name: 'Ira', buff: true, mods: [{ t: 'str', e: '+4' }] }] });
+  actions['char.set'](p, { id: cid, path: ['feats', 0, 'mods', 0, 'e'], value: '+6' });
+  actions['char.set'](p, { id: cid, path: ['feats', 1], value: { name: 'Allerta' } }); // la prossima riga si può aggiungere
+  for (const [path, value] of [[['feats', 0, 'mods'], 5], [['feats', 0, 'mods', 0], { t: 'str' }], [['feats', 0, 'mods', 3, 'e'], '+1'],
+    [['feats', 5, 'name'], 'x'], [['feats', 3], {}], [['skills', 9, 'name'], 'x'], [['feats', 0], { mods: [[1]] }], [['feats', 0], { mods: 'x' }]]) {
+    assert.throws(() => actions['char.set'](p, { id: cid, path, value }), JSON.stringify(path));
+  }
+  assert.deepStrictEqual(C(p).characters[cid].feats.map(f => [f.name, f.mods?.[0]?.e]), [['Ira', '+6'], ['Allerta', undefined]]);
+  // talenti ed equipaggiamento scritti come testo diventano slot
+  const old = { cls: 'Ladro 5', feats: '- Allerta\n\n* Schivare ', gear: 'x1 Corda', special: 'Visione crepuscolare' };
+  migrateChar(old);
+  assert.deepStrictEqual([old.level, old.feats, old.gear, old.special], ['5', [{ name: 'Allerta' }, { name: 'Schivare' }], [{ name: 'x1 Corda' }], [{ name: 'Visione crepuscolare' }]]);
+  actions['char.set'](p, { id: cid, path: ['special'], value: [{ name: 'Sangue elfico', src: 'Razza', notes: '+1 Osservare', mods: [{ t: 'skill:Osservare', e: '+1' }] }] });
+  assert.strictEqual(C(p).characters[cid].special[0].mods[0].e, '+1');
   assert.strictEqual(actions['char.create'](p, { data: { name: 'X', secret: true, skills: 7 } }) && Object.values(C(p).characters).some(c => c.secret || c.skills === 7), false);
   // schede "solo master": ai giocatori arriva solo nome e taglia
   const drago = actions['char.create'](master, { data: { name: 'Drago', size: 'Enorme' } }).id;
